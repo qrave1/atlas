@@ -13,3 +13,7 @@ The Go module is github.com/qrave1/atlas. Keep internal/planner as the calendar 
 Use github.com/caarlos0/env/v11 for configuration and google.golang.org/api/calendar/v3 for Google Calendar.
 Dockerfile, docker-compose.yml, and the GHCR build workflow follow qrave1/sozvon, adapted for Atlas.
 Ask the owner before adopting additional code or architecture practices from qrave1/sozvon.
+
+Owner-approved conventions: group Config into Telegram, AI, Google, Database and expose config.New().
+Use urfave/cli/v3 with one Atlas binary (run and google-auth commands).
+Keep database/sql; do not introduce GORM or another ORM.

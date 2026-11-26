@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/urfave/cli/v3"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -19,7 +20,7 @@ import (
 )
 
 func run(ctx context.Context, logger *slog.Logger) error {
-	cfg, err := config.Load()
+	cfg, err := config.New()
 	if err != nil {
 		return err
 	}
@@ -27,7 +28,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	repo, err := store.New(ctx, cfg.DatabasePath)
+	repo, err := store.New(ctx, cfg.Database.Path)
 	if err != nil {
 		return err
 	}
@@ -36,7 +37,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	telegramHTTP, err := config.HTTPClient(cfg.TelegramProxy, 70*time.Second)
+	telegramHTTP, err := config.HTTPClient(cfg.Telegram.ProxyURL, 70*time.Second)
 	if err != nil {
 		return err
 	}
@@ -44,27 +45,32 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	googleHTTP, err := calendar.AuthorizedClient(ctx, directHTTP, cfg.GoogleCredentials, cfg.GoogleToken)
+	googleHTTP, err := calendar.AuthorizedClient(ctx, directHTTP, cfg.Google.CredentialsFile, cfg.Google.TokenFile)
 	if err != nil {
 		return err
 	}
-	brain := ai.New(directHTTP, cfg.AIBaseURL, cfg.AIKey, cfg.ChatModel, cfg.TranscribeModel)
-	cal, err := calendar.New(ctx, googleHTTP, cfg.CalendarID, state.InstallationID, location)
+	brain := ai.New(directHTTP, cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.ChatModel, cfg.AI.TranscribeModel)
+	cal, err := calendar.New(ctx, googleHTTP, cfg.Google.CalendarID, state.InstallationID, location)
 	if err != nil {
 		return err
 	}
 	service := planner.New(repo, brain, cal, location)
-	telegram := bot.NewTelegram(telegramHTTP, cfg.TelegramToken)
-	logger.Info("Atlas started", "owner_id", config.OwnerID, "telegram_proxy_enabled", cfg.TelegramProxy != "")
+	telegram := bot.NewTelegram(telegramHTTP, cfg.Telegram.Token)
+	logger.Info("Atlas started", "owner_id", config.OwnerID, "telegram_proxy_enabled", cfg.Telegram.ProxyURL != "")
 	return bot.New(telegram, service, repo, brain, logger).Run(ctx)
 }
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	if err := run(ctx, logger); err != nil && !errors.Is(err, context.Canceled) {
+	command := newCommand(func(ctx context.Context) error { return run(ctx, logger) }, calendar.Authorize)
+	if err := command.Run(ctx, os.Args); err != nil && !errors.Is(err, context.Canceled) {
 		logger.Error("Atlas stopped", "error", err)
+		var exitCoder cli.ExitCoder
+		if errors.As(err, &exitCoder) {
+			os.Exit(exitCoder.ExitCode())
+		}
 		os.Exit(1)
 	}
 }

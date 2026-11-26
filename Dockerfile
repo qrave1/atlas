@@ -13,4 +13,4 @@ RUN apk add --no-cache ca-certificates ffmpeg \
     && chown -R atlas:atlas /app/data /app/google /app/secrets
 COPY --from=builder /app/build .
 USER 10001:10001
-CMD ["./build"]
+CMD ["./build", "run"]

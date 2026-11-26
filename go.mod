@@ -4,6 +4,7 @@ go 1.27.0
 
 require (
 	github.com/caarlos0/env/v11 v11.4.1
+	github.com/urfave/cli/v3 v3.10.1
 	golang.org/x/oauth2 v0.38.0
 	google.golang.org/api v0.317.0
 	modernc.org/sqlite v1.63.0

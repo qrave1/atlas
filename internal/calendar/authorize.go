@@ -1,26 +1,25 @@
-// google-auth performs a one-time desktop OAuth flow on the owner's machine.
-package main
+// Package calendar implements the Google Calendar integration.
+package calendar
 
 import (
 	"context"
 	"crypto/rand"
-	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
-	"os"
 	"time"
 
-	"github.com/qrave1/atlas/internal/calendar"
 	"github.com/qrave1/atlas/internal/config"
 	"golang.org/x/oauth2"
 )
 
-func run() error {
-	credentials := flag.String("credentials", "secrets/google-credentials.json", "Desktop OAuth client JSON")
-	tokenPath := flag.String("token", "data/google-token.json", "Destination token file")
-	flag.Parse()
-	cfg, err := calendar.OAuthConfig(*credentials)
+// Authorize performs desktop OAuth and saves the token; the caller owns cancellation.
+func Authorize(ctx context.Context, credentialsPath, tokenPath string, output io.Writer) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	cfg, err := OAuthConfig(credentialsPath)
 	if err != nil {
 		return err
 	}
@@ -32,7 +31,7 @@ func run() error {
 	cfg.RedirectURL = "http://127.0.0.1:8765/callback"
 	state := rand.Text()
 	verifier := oauth2.GenerateVerifier()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	base, err := config.HTTPClient("", 45*time.Second)
 	if err != nil {
@@ -59,7 +58,7 @@ func run() error {
 			exchangeErr = fmt.Errorf("no refresh token; revoke old consent and authorize again")
 		}
 		if exchangeErr == nil {
-			exchangeErr = calendar.SaveToken(*tokenPath, token)
+			exchangeErr = SaveToken(tokenPath, token)
 		}
 		if exchangeErr != nil {
 			http.Error(w, "Authorization failed; check terminal", http.StatusBadRequest)
@@ -81,22 +80,15 @@ func run() error {
 		}
 	}()
 	defer server.Close()
-	fmt.Println("Откройте ссылку на ЭТОМ компьютере и войдите в нужный Google-аккаунт:")
-	fmt.Println(cfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"), oauth2.S256ChallengeOption(verifier)))
+	fmt.Fprintln(output, "Откройте ссылку на ЭТОМ компьютере и войдите в нужный Google-аккаунт:")
+	fmt.Fprintln(output, cfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"), oauth2.S256ChallengeOption(verifier)))
 	select {
 	case err = <-result:
 		if err == nil {
-			fmt.Println("Токен сохранён:", *tokenPath)
+			fmt.Fprintln(output, "Токен сохранён:", tokenPath)
 		}
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
-	}
-}
-
-func main() {
-	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
 	}
 }
