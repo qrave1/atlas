@@ -1,0 +1,43 @@
+services:
+    atlas:
+        image: ghcr.io/qrave1/atlas:latest
+        container_name: atlas
+        restart: always
+        init: true
+        env_file:
+            - .env
+        environment:
+            DATABASE_PATH: /app/data/atlas.db
+            GOOGLE_CREDENTIALS_FILE: /app/secrets/google-credentials.json
+            GOOGLE_TOKEN_FILE: /app/google/google-token.json
+        volumes:
+            - atlas-data:/app/data
+            - ./secrets:/app/secrets:ro
+            - ./google:/app/google
+        labels:
+            - "com.centurylinklabs.watchtower.enable=true"
+            - "com.centurylinklabs.watchtower.scope=atlas"
+        read_only: true
+        tmpfs:
+            - /tmp:rw,noexec,nosuid,size=128m,mode=1777
+        cap_drop: [ALL]
+        security_opt:
+            - no-new-privileges:true
+        stop_grace_period: 30s
+        logging:
+            driver: json-file
+            options:
+                max-size: 10m
+                max-file: "3"
+
+    watchtower:
+        image: ghcr.io/nicholas-fedor/watchtower:latest
+        restart: always
+        volumes:
+            - /var/run/docker.sock:/var/run/docker.sock
+        command: --scope atlas --label-enable --cleanup --interval 300
+        labels:
+            - "com.centurylinklabs.watchtower.scope=atlas"
+
+volumes:
+    atlas-data:

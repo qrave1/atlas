@@ -1,0 +1,12 @@
+.git
+.env
+.tools
+data
+secrets
+bin
+*.exe
+coverage.out
+
+google
+scripts
+.github
