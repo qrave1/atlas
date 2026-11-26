@@ -3,10 +3,12 @@ package calendar
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -50,7 +52,21 @@ func SaveToken(path string, token *oauth2.Token) error {
 	if err = f.Close(); err != nil {
 		return err
 	}
-	return os.Rename(name, path)
+	// Linux cannot rename over an individual Docker bind mount.
+	if err := os.Rename(name, path); !errors.Is(err, syscall.EBUSY) {
+		return err
+	}
+	mounted, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	if _, err = mounted.Write(raw); err == nil {
+		err = mounted.Truncate(int64(len(raw)))
+	}
+	if err == nil {
+		err = mounted.Sync()
+	}
+	return errors.Join(err, mounted.Close())
 }
 
 type tokenSource struct {

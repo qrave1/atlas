@@ -32,8 +32,8 @@ type AI struct {
 }
 
 type Google struct {
-	CredentialsFile string `env:"GOOGLE_CREDENTIALS_FILE" envDefault:"secrets/google-credentials.json"`
-	TokenFile       string `env:"GOOGLE_TOKEN_FILE" envDefault:"data/google-token.json"`
+	CredentialsFile string `env:"GOOGLE_CREDENTIALS_FILE" envDefault:"google-credentials.json"`
+	TokenFile       string `env:"GOOGLE_TOKEN_FILE" envDefault:"google-token.json"`
 	CalendarID      string `env:"GOOGLE_CALENDAR_ID" envDefault:"primary"`
 }
 

@@ -39,8 +39,8 @@ func newCommand(
 			{
 				Name: "google-auth", Usage: "Connect Google Calendar on this computer",
 				Flags: []cli.Flag{
-					&cli.StringFlag{Name: "credentials", Usage: "Desktop OAuth JSON path (default: GOOGLE_CREDENTIALS_FILE or secrets/google-credentials.json)"},
-					&cli.StringFlag{Name: "token", Usage: "Token output path (default: GOOGLE_TOKEN_FILE or data/google-token.json)"},
+					&cli.StringFlag{Name: "credentials", Usage: "Desktop OAuth JSON path (default: GOOGLE_CREDENTIALS_FILE or google-credentials.json)"},
+					&cli.StringFlag{Name: "token", Usage: "Token output path (default: GOOGLE_TOKEN_FILE or google-token.json)"},
 				},
 				Action: func(ctx context.Context, command *cli.Command) error {
 					if command.Args().Present() {

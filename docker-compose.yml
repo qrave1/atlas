@@ -7,12 +7,21 @@ services:
             - .env
         environment:
             DATABASE_PATH: /app/data/atlas.db
-            GOOGLE_CREDENTIALS_FILE: /app/secrets/google-credentials.json
-            GOOGLE_TOKEN_FILE: /app/google/google-token.json
+            GOOGLE_CREDENTIALS_FILE: /app/google-credentials.json
+            GOOGLE_TOKEN_FILE: /app/google-token.json
         volumes:
             - atlas-data:/app/data
-            - ./secrets:/app/secrets:ro
-            - ./google:/app/google
+            - type: bind
+              source: ./google-credentials.json
+              target: /app/google-credentials.json
+              read_only: true
+              bind:
+                  create_host_path: false
+            - type: bind
+              source: ./google-token.json
+              target: /app/google-token.json
+              bind:
+                  create_host_path: false
         labels:
             - "com.centurylinklabs.watchtower.enable=false"
 
