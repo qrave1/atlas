@@ -3,6 +3,8 @@ package bot
 import (
 	"context"
 	"fmt"
+	tele "gopkg.in/telebot.v4"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,4 +37,16 @@ func convertVoice(ctx context.Context, audio []byte) ([]byte, error) {
 		return nil, fmt.Errorf("converted voice too large")
 	}
 	return os.ReadFile(output)
+}
+
+const maxVoiceBytes = 20 << 20
+
+func downloadVoice(ctx context.Context, api *tele.Bot, file tele.File) ([]byte, error) {
+	var body io.ReadCloser
+	err := retry(ctx, func() error { var err error; body, err = api.File(&file); return err })
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+	return io.ReadAll(body)
 }

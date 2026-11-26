@@ -7,6 +7,7 @@ require (
 	github.com/urfave/cli/v3 v3.10.1
 	golang.org/x/oauth2 v0.38.0
 	google.golang.org/api v0.317.0
+	gopkg.in/telebot.v4 v4.0.0
 	modernc.org/sqlite v1.63.0
 )
 

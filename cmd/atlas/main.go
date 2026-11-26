@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/urfave/cli/v3"
+	tele "gopkg.in/telebot.v4"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -55,7 +56,10 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		return err
 	}
 	service := planner.New(repo, brain, cal, location)
-	telegram := bot.NewTelegram(telegramHTTP, cfg.Telegram.Token)
+	telegram, err := bot.NewTelegramClient(ctx, tele.Settings{Token: cfg.Telegram.Token, Client: telegramHTTP, Offline: true, Updates: 1})
+	if err != nil {
+		return err
+	}
 	logger.Info("Atlas started", "owner_id", config.OwnerID, "telegram_proxy_enabled", cfg.Telegram.ProxyURL != "")
 	return bot.New(telegram, service, repo, brain, logger).Run(ctx)
 }
