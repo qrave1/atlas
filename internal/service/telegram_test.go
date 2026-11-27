@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -160,36 +159,5 @@ func TestStartupErrorReportsStatusWithoutSecrets(t *testing.T) {
 	_, err := newTelegram(t.Context(), tele.Settings{URL: server.URL, Client: server.Client(), Token: "12345:SECRET"}, slog.Default())
 	if err == nil || err.Error() != "Telegram startup check (getMe): Telegram HTTP 401" {
 		t.Fatalf("unexpected startup error: %v", err)
-	}
-}
-
-func TestStartupChecksProxyWithoutLoggingCredentials(t *testing.T) {
-	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Host != "telegram.invalid" || !strings.HasSuffix(r.URL.Path, "/getMe") {
-			t.Errorf("unexpected proxy request")
-		}
-		http.Error(w, "private-response", http.StatusProxyAuthRequired)
-	}))
-	defer proxy.Close()
-	client, err := (config.Telegram{ProxyURL: strings.Replace(proxy.URL, "http://", "http://user:private-password@", 1)}).HTTPClient()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var logs bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&logs, nil)).With("proxy_enabled", true)
-	_, err = newTelegram(t.Context(), tele.Settings{URL: "http://telegram.invalid", Token: "12345:private-token", Client: client}, logger)
-	if err == nil || !strings.Contains(err.Error(), "407") {
-		t.Fatalf("unexpected result: %v", err)
-	}
-	line := logs.String()
-	for _, want := range []string{`"method":"getMe"`, `"status":407`, `"proxy_enabled":true`, `"duration_ms":`} {
-		if !strings.Contains(line, want) {
-			t.Errorf("missing %s", want)
-		}
-	}
-	for _, secret := range []string{"private-password", "private-token", "private-response"} {
-		if strings.Contains(line, secret) {
-			t.Error("sensitive data in logs")
-		}
 	}
 }

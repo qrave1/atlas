@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	tele "gopkg.in/telebot.v4"
@@ -46,4 +48,37 @@ func sendReply(ctx context.Context, api *tele.Bot, reply planner.Reply) error {
 		}
 	}
 	return nil
+}
+
+func retryTelegram(ctx context.Context, call func() error) error {
+	for attempt := 0; attempt < 4; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := call()
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		var flood tele.FloodError
+		if !errors.As(err, &flood) || flood.RetryAfter < 1 || flood.RetryAfter > 60 {
+			var failure telegramFailure
+			if errors.As(err, &failure) {
+				return failure
+			}
+			var apiErr *tele.Error
+			if errors.As(err, &apiErr) {
+				return fmt.Errorf("Telegram API error %d", apiErr.Code)
+			}
+			return errors.New("Telegram request failed without an API status")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(flood.RetryAfter) * time.Second):
+		}
+	}
+	return errors.New("telegram rate limit retry budget exhausted")
 }

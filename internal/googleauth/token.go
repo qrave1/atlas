@@ -76,7 +76,7 @@ func Authorize(ctx context.Context, credentialsPath, tokenPath string, output io
 	verifier := oauth2.GenerateVerifier()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	ctx = context.WithValue(ctx, oauth2.HTTPClient, config.DirectHTTPClient(45*time.Second))
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, config.HTTPClient(45*time.Second))
 	result := make(chan error, 1)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {

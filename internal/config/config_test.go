@@ -28,12 +28,11 @@ func TestNewEnvTagsDefaultsAndOverrides(t *testing.T) {
 		t.Fatalf("defaults not parsed: %+v", cfg)
 	}
 	t.Setenv("DATABASE_PATH", "custom/state.db")
-	t.Setenv("TELEGRAM_PROXY_URL", "socks5://user:pass@proxy.example:1080")
 	cfg, err = New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Database.Path != "custom/state.db" || cfg.Telegram.ProxyURL != "socks5://user:pass@proxy.example:1080" {
+	if cfg.Database.Path != "custom/state.db" {
 		t.Fatal("env overrides not parsed")
 	}
 }

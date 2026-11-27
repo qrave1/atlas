@@ -21,8 +21,7 @@ type Config struct {
 }
 
 type Telegram struct {
-	Token    string `env:"TELEGRAM_BOT_TOKEN,required,notEmpty"`
-	ProxyURL string `env:"TELEGRAM_PROXY_URL"`
+	Token string `env:"TELEGRAM_BOT_TOKEN,required,notEmpty"`
 }
 
 type AI struct {
@@ -66,26 +65,6 @@ func NewGoogle() (*Google, error) {
 	return &cfg, nil
 }
 
-func DirectHTTPClient(timeout time.Duration) *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	return &http.Client{Transport: transport, Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-}
-
-func (t Telegram) HTTPClient() (*http.Client, error) {
-	client := DirectHTTPClient(70 * time.Second)
-	if t.ProxyURL == "" {
-		return client, nil
-	}
-	proxy, err := url.Parse(t.ProxyURL)
-	if err != nil || proxy.Host == "" {
-		return nil, fmt.Errorf("invalid proxy url")
-	}
-	switch proxy.Scheme {
-	case "http", "https", "socks5", "socks5h":
-		client.Transport.(*http.Transport).Proxy = http.ProxyURL(proxy)
-	default:
-		return nil, fmt.Errorf("unsupported proxy scheme")
-	}
-	return client, nil
+func HTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{Timeout: timeout}
 }

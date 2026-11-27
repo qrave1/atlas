@@ -4,7 +4,7 @@ Use the `golang-how-to` skill for Go tasks and load the relevant Go skills.
 Keep small packages and manual constructor injection. The owner user ID is deliberately hardcoded.
 Never allow AI output to invoke calendar mutations without confirmation of a stored proposal.
 Only events registered locally AND marked with this installation ID may be modified or deleted.
-All Telegram traffic, including file downloads, must use the configured proxy.
+Telegram traffic uses the standard Go HTTP client; do not add application proxy configuration.
 Run `go test ./...` and `go vet ./...` after behavior changes.
 
 # Project requirements

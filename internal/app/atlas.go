@@ -32,10 +32,10 @@ func RunAtlas(ctx context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	directHTTP := config.DirectHTTPClient(90 * time.Second)
-	brain := ai.New(directHTTP, cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.ChatModel, cfg.AI.TranscribeModel)
+	httpClient := config.HTTPClient(90 * time.Second)
+	brain := ai.New(httpClient, cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.ChatModel, cfg.AI.TranscribeModel)
 	brain.SetModelsStore(repo)
-	cal, err := calendar.New(ctx, directHTTP, cfg.Google, state.InstallationID, location)
+	cal, err := calendar.New(ctx, httpClient, cfg.Google, state.InstallationID, location)
 	if err != nil {
 		return err
 	}
@@ -44,6 +44,6 @@ func RunAtlas(ctx context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	logger.Info("Atlas started", "owner_id", config.OwnerID, "telegram_proxy_enabled", cfg.Telegram.ProxyURL != "")
+	logger.Info("Atlas started", "owner_id", config.OwnerID)
 	return bot.Run(ctx)
 }
