@@ -105,6 +105,8 @@ func (b *Bot) handleUpdate(ctx context.Context, u tele.Update) error {
 			return nil
 		}
 		switch kind {
+		case "model":
+			return b.selectModel(ctx, id)
 		case "confirm":
 			reply, err = b.planner.Confirm(ctx, id)
 		case "cancel":
@@ -143,7 +145,9 @@ func (b *Bot) handleUpdate(ctx context.Context, u tele.Update) error {
 		}
 		switch text {
 		case "/start", "/help":
-			reply.Text = "Я Atlas, ваш личный помощник. Отправьте задачу голосом или текстом. Если нет длительности — спрошу. Декомпозиция — только по просьбе. Все изменения — после кнопки подтверждения.\n\n/tasks — мои события\n/cancel — отменить диалог\n/resume — продолжить прерванную запись\n/discard — прекратить оставшиеся действия без отката уже выполненных"
+			reply.Text = "Я Atlas, ваш личный помощник. Отправьте задачу голосом или текстом. Если нет длительности — спрошу. Декомпозиция — только по просьбе. Все изменения — после кнопки подтверждения.\n\n/models — выбор моделей\n/tasks — мои события\n/cancel — отменить диалог\n/resume — продолжить прерванную запись\n/discard — прекратить оставшиеся действия без отката уже выполненных"
+		case "/models":
+			return b.showModels(ctx)
 		case "/tasks":
 			reply, err = b.planner.Tasks(ctx)
 		case "/cancel":

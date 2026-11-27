@@ -41,6 +41,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	}
 	directHTTP := config.DirectHTTPClient(90 * time.Second)
 	brain := ai.New(directHTTP, cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.ChatModel, cfg.AI.TranscribeModel)
+	brain.SetModelsStore(repo)
 	cal, err := calendar.New(ctx, directHTTP, cfg.Google, state.InstallationID, location)
 	if err != nil {
 		return err

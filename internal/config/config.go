@@ -28,8 +28,8 @@ type Telegram struct {
 type AI struct {
 	APIKey          string `env:"AI_API_KEY,required,notEmpty"`
 	BaseURL         string `env:"AI_BASE_URL" envDefault:"https://api.proxyapi.ru/v1"`
-	ChatModel       string `env:"AI_CHAT_MODEL" envDefault:"openai/gpt-5-mini"`
-	TranscribeModel string `env:"AI_TRANSCRIBE_MODEL" envDefault:"openai/gpt-4o-mini-transcribe"`
+	ChatModel       string `env:"AI_CHAT_MODEL" envDefault:"deepseek/deepseek-v4.1-flash-1017"`
+	TranscribeModel string `env:"AI_TRANSCRIBE_MODEL" envDefault:"openai/whisper-large-v3"`
 }
 
 type Google struct {

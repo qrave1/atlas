@@ -41,9 +41,11 @@ type Proposal struct {
 }
 
 type State struct {
-	InstallationID string          `json:"installation_id"`
-	Offset         int64           `json:"offset"`
-	History        []Message       `json:"history"`
-	Owned          map[string]bool `json:"owned"`
-	Pending        *Proposal       `json:"pending,omitempty"`
+	ChatModel       string          `json:"chat_model,omitempty"`
+	TranscribeModel string          `json:"transcribe_model,omitempty"`
+	InstallationID  string          `json:"installation_id"`
+	Offset          int64           `json:"offset"`
+	History         []Message       `json:"history"`
+	Owned           map[string]bool `json:"owned"`
+	Pending         *Proposal       `json:"pending,omitempty"`
 }
