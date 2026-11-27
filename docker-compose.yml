@@ -7,19 +7,13 @@ services:
             - .env
         environment:
             DATABASE_PATH: /app/data/atlas.db
-            GOOGLE_CREDENTIALS_FILE: /app/google-credentials.json
-            GOOGLE_TOKEN_FILE: /app/google-token.json
+            GOOGLE_CREDENTIALS_FILE: ./secrets/google-credentials.json
+            GOOGLE_TOKEN_FILE: ./secrets/google-token.json
         volumes:
             - atlas-data:/app/data
             - type: bind
-              source: ./google-credentials.json
-              target: /app/google-credentials.json
-              read_only: true
-              bind:
-                  create_host_path: false
-            - type: bind
-              source: ./google-token.json
-              target: /app/google-token.json
+              source: ./secrets
+              target: /app/secrets
               bind:
                   create_host_path: false
         labels:

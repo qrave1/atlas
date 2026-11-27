@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qrave1/atlas/internal/calendar"
+	"github.com/qrave1/atlas/internal/clients/calendar"
 	"github.com/qrave1/atlas/internal/model"
 	"github.com/qrave1/atlas/internal/store"
 )

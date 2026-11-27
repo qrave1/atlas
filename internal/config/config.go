@@ -3,9 +3,10 @@ package config
 import (
 	"fmt"
 	"net/http"
+	"time"
+
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/caarlos0/env/v11"
 )
@@ -32,8 +33,8 @@ type AI struct {
 }
 
 type Google struct {
-	CredentialsFile string `env:"GOOGLE_CREDENTIALS_FILE" envDefault:"google-credentials.json"`
-	TokenFile       string `env:"GOOGLE_TOKEN_FILE" envDefault:"google-token.json"`
+	CredentialsFile string `env:"GOOGLE_CREDENTIALS_FILE" envDefault:"./secrets/google-credentials.json"`
+	TokenFile       string `env:"GOOGLE_TOKEN_FILE" envDefault:"./secrets/google-token.json"`
 	CalendarID      string `env:"GOOGLE_CALENDAR_ID" envDefault:"primary"`
 }
 
@@ -65,21 +66,26 @@ func NewGoogle() (*Google, error) {
 	return &cfg, nil
 }
 
-// HTTPClient uses only the explicitly supplied proxy, never global proxy env vars.
-func HTTPClient(proxy string, timeout time.Duration) (*http.Client, error) {
+func DirectHTTPClient(timeout time.Duration) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
-	if proxy != "" {
-		u, err := url.Parse(proxy)
-		if err != nil || u.Host == "" {
-			return nil, fmt.Errorf("invalid proxy url")
-		}
-		switch u.Scheme {
-		case "http", "https", "socks5", "socks5h":
-		default:
-			return nil, fmt.Errorf("unsupported proxy scheme")
-		}
-		transport.Proxy = http.ProxyURL(u)
+	return &http.Client{Transport: transport, Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}
+
+func (t Telegram) HTTPClient() (*http.Client, error) {
+	client := DirectHTTPClient(70 * time.Second)
+	if t.ProxyURL == "" {
+		return client, nil
 	}
-	return &http.Client{Transport: transport, Timeout: timeout, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}, nil
+	proxy, err := url.Parse(t.ProxyURL)
+	if err != nil || proxy.Host == "" {
+		return nil, fmt.Errorf("invalid proxy url")
+	}
+	switch proxy.Scheme {
+	case "http", "https", "socks5", "socks5h":
+		client.Transport.(*http.Transport).Proxy = http.ProxyURL(proxy)
+	default:
+		return nil, fmt.Errorf("unsupported proxy scheme")
+	}
+	return client, nil
 }

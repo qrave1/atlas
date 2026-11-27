@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	openai "github.com/sashabaranov/go-openai"
 )
 
 func TestTranscriptionRequestContract(t *testing.T) {
@@ -71,5 +73,24 @@ func TestUpstreamErrorBodyIsNotExposed(t *testing.T) {
 	_, err := client.Decide(context.Background(), time.Now(), nil, nil, nil)
 	if err == nil || strings.Contains(err.Error(), "sensitive") {
 		t.Fatalf("unsafe error: %v", err)
+	}
+}
+
+func TestDecisionRequestContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request openai.ChatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		if r.URL.Path != "/v1/chat/completions" || request.Model != "openai/gpt-5-mini" || request.MaxCompletionTokens != 8000 || request.ResponseFormat == nil || request.ResponseFormat.Type != openai.ChatCompletionResponseFormatTypeJSONObject || len(request.Messages) != 2 {
+			t.Error("unexpected chat request")
+		}
+		io.WriteString(w, `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"{\"reply\":\"ok\",\"actions\":[]}"}}]}`)
+	}))
+	defer server.Close()
+	c := New(server.Client(), server.URL+"/v1", "test", "openai/gpt-5-mini", "speech")
+	decision, err := c.Decide(t.Context(), time.Now(), nil, nil, nil)
+	if err != nil || decision.Reply != "ok" {
+		t.Fatalf("decision=%+v error=%v", decision, err)
 	}
 }

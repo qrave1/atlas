@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/qrave1/atlas/internal/calendar"
+	"github.com/qrave1/atlas/internal/clients/calendar"
 	"github.com/qrave1/atlas/internal/model"
 )
 

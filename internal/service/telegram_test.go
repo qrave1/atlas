@@ -1,11 +1,12 @@
-package bot
+package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,7 +16,7 @@ import (
 	tele "gopkg.in/telebot.v4"
 
 	"github.com/qrave1/atlas/internal/config"
-	"github.com/qrave1/atlas/internal/planner"
+	"github.com/qrave1/atlas/internal/service/planner"
 )
 
 func TestAuthorization(t *testing.T) {
@@ -54,7 +55,7 @@ func TestTelegramHonorsRetryAfter(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]int{"message_id": 1}})
 	}))
 	defer server.Close()
-	tg, err := NewTelegramClient(t.Context(), tele.Settings{URL: server.URL, Client: server.Client(), Token: "test", Offline: true})
+	tg, err := newTelegram(t.Context(), tele.Settings{URL: server.URL, Client: server.Client(), Token: "test", Offline: true}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +87,7 @@ func TestDownloadUsesSameClientAsAPI(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	tg, err := NewTelegramClient(t.Context(), tele.Settings{URL: server.URL, Client: server.Client(), Token: "test", Offline: true})
+	tg, err := newTelegram(t.Context(), tele.Settings{URL: server.URL, Client: server.Client(), Token: "test", Offline: true}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +111,7 @@ func TestReplyCarriesProposalButtons(t *testing.T) {
 		w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
 	}))
 	defer server.Close()
-	api, err := NewTelegramClient(t.Context(), tele.Settings{URL: server.URL, Client: server.Client(), Token: "test", Offline: true})
+	api, err := newTelegram(t.Context(), tele.Settings{URL: server.URL, Client: server.Client(), Token: "test", Offline: true}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +138,7 @@ func TestCancelInterruptsPolling(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
-	api, err := NewTelegramClient(ctx, tele.Settings{URL: server.URL, Client: server.Client(), Token: "test", Offline: true})
+	api, err := newTelegram(ctx, tele.Settings{URL: server.URL, Client: server.Client(), Token: "test", Offline: true}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,5 +151,45 @@ func TestCancelInterruptsPolling(t *testing.T) {
 	}()
 	if _, err := pollUpdates(ctx, api, 0); !errors.Is(err, context.Canceled) {
 		t.Fatalf("poll: %v", err)
+	}
+}
+
+func TestStartupErrorReportsStatusWithoutSecrets(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "sensitive body", http.StatusUnauthorized) }))
+	defer server.Close()
+	_, err := newTelegram(t.Context(), tele.Settings{URL: server.URL, Client: server.Client(), Token: "12345:SECRET"}, slog.Default())
+	if err == nil || err.Error() != "Telegram startup check (getMe): Telegram HTTP 401" {
+		t.Fatalf("unexpected startup error: %v", err)
+	}
+}
+
+func TestStartupChecksProxyWithoutLoggingCredentials(t *testing.T) {
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Host != "telegram.invalid" || !strings.HasSuffix(r.URL.Path, "/getMe") {
+			t.Errorf("unexpected proxy request")
+		}
+		http.Error(w, "private-response", http.StatusProxyAuthRequired)
+	}))
+	defer proxy.Close()
+	client, err := (config.Telegram{ProxyURL: strings.Replace(proxy.URL, "http://", "http://user:private-password@", 1)}).HTTPClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil)).With("proxy_enabled", true)
+	_, err = newTelegram(t.Context(), tele.Settings{URL: "http://telegram.invalid", Token: "12345:private-token", Client: client}, logger)
+	if err == nil || !strings.Contains(err.Error(), "407") {
+		t.Fatalf("unexpected result: %v", err)
+	}
+	line := logs.String()
+	for _, want := range []string{`"method":"getMe"`, `"status":407`, `"proxy_enabled":true`, `"duration_ms":`} {
+		if !strings.Contains(line, want) {
+			t.Errorf("missing %s", want)
+		}
+	}
+	for _, secret := range []string{"private-password", "private-token", "private-response"} {
+		if strings.Contains(line, secret) {
+			t.Error("sensitive data in logs")
+		}
 	}
 }

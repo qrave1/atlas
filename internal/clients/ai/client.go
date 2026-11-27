@@ -4,74 +4,65 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"strings"
 	"time"
+
+	openai "github.com/sashabaranov/go-openai"
 
 	"github.com/qrave1/atlas/internal/model"
 )
 
 type Client struct {
-	http                                     *http.Client
-	baseURL, key, chatModel, transcribeModel string
+	api                        *openai.Client
+	chatModel, transcribeModel string
 }
 
 func New(client *http.Client, baseURL, key, chatModel, transcribeModel string) *Client {
-	return &Client{client, strings.TrimRight(baseURL, "/"), key, chatModel, transcribeModel}
+	cfg := openai.DefaultConfig(key)
+	cfg.BaseURL = strings.TrimRight(baseURL, "/")
+	cfg.HTTPClient = boundedClient{client}
+	return &Client{openai.NewClientWithConfig(cfg), chatModel, transcribeModel}
 }
 
-func (c *Client) request(ctx context.Context, path, contentType string, body io.Reader, out any) error {
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+path, body)
+type boundedClient struct{ *http.Client }
+
+func (c boundedClient) Do(req *http.Request) (*http.Response, error) {
+	resp, err := c.Client.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.key)
-	req.Header.Set("Content-Type", contentType)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("ai request failed")
+	resp.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.LimitReader(resp.Body, 2<<20), resp.Body}
+	return resp, nil
+}
+
+// SDK errors can include prompts, server responses or request URLs.
+func requestError(err error) error {
+	var apiErr *openai.APIError
+	var reqErr *openai.RequestError
+	switch {
+	case errors.As(err, &apiErr):
+		return fmt.Errorf("ai http %d", apiErr.HTTPStatusCode)
+	case errors.As(err, &reqErr):
+		return fmt.Errorf("ai http %d", reqErr.HTTPStatusCode)
+	default:
+		return errors.New("ai request failed")
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("ai http %d", resp.StatusCode)
-	}
-	return json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(out)
 }
 
 func (c *Client) Transcribe(ctx context.Context, wav []byte) (string, error) {
-	var body bytes.Buffer
-	w := multipart.NewWriter(&body)
-	if err := w.WriteField("model", c.transcribeModel); err != nil {
-		return "", err
-	}
-	if err := w.WriteField("language", "ru"); err != nil {
-		return "", err
-	}
-	if err := w.WriteField("response_format", "json"); err != nil {
-		return "", err
-	}
-	part, err := w.CreateFormFile("file", "voice.wav")
+	result, err := c.api.CreateTranscription(ctx, openai.AudioRequest{Model: c.transcribeModel, FilePath: "voice.wav", Reader: bytes.NewReader(wav), Language: "ru", Format: openai.AudioResponseFormatJSON})
 	if err != nil {
-		return "", err
-	}
-	if _, err = part.Write(wav); err != nil {
-		return "", err
-	}
-	if err = w.Close(); err != nil {
-		return "", err
-	}
-	var result struct {
-		Text string `json:"text"`
-	}
-	err = c.request(ctx, "/audio/transcriptions", w.FormDataContentType(), &body, &result)
-	if err != nil {
-		return "", err
+		return "", requestError(err)
 	}
 	if strings.TrimSpace(result.Text) == "" {
-		return "", fmt.Errorf("empty transcription")
+		return "", errors.New("empty transcription")
 	}
 	return result.Text, nil
 }
@@ -100,22 +91,21 @@ func (c *Client) Decide(ctx context.Context, now time.Time, history []model.Mess
 	if err != nil {
 		return model.Decision{}, err
 	}
-	messages := []model.Message{{Role: "system", Content: instruction}, {Role: "system", Content: "Контекст приложения: " + string(data)}}
-	messages = append(messages, history...)
-	body, err := json.Marshal(map[string]any{"model": c.chatModel, "messages": messages, "max_completion_tokens": 8000, "response_format": map[string]string{"type": "json_object"}})
+	messages := []openai.ChatCompletionMessage{
+		{Role: openai.ChatMessageRoleSystem, Content: instruction},
+		{Role: openai.ChatMessageRoleSystem, Content: "Контекст приложения: " + string(data)},
+	}
+	for _, m := range history {
+		messages = append(messages, openai.ChatCompletionMessage{Role: m.Role, Content: m.Content})
+	}
+	response, err := c.api.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+		Model: c.chatModel, Messages: messages, MaxCompletionTokens: 8000,
+		ResponseFormat: &openai.ChatCompletionResponseFormat{Type: openai.ChatCompletionResponseFormatTypeJSONObject},
+	})
 	if err != nil {
-		return model.Decision{}, err
+		return model.Decision{}, requestError(err)
 	}
-	var response struct {
-		Choices []struct {
-			Message      model.Message `json:"message"`
-			FinishReason string        `json:"finish_reason"`
-		} `json:"choices"`
-	}
-	if err = c.request(ctx, "/chat/completions", "application/json", bytes.NewReader(body), &response); err != nil {
-		return model.Decision{}, err
-	}
-	if len(response.Choices) != 1 || response.Choices[0].FinishReason != "stop" {
+	if len(response.Choices) != 1 || response.Choices[0].FinishReason != openai.FinishReasonStop {
 		return model.Decision{}, fmt.Errorf("incomplete ai response")
 	}
 	var decision model.Decision

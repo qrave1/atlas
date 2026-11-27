@@ -1,8 +1,9 @@
-package bot
+package service
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -10,7 +11,7 @@ import (
 	tele "gopkg.in/telebot.v4"
 
 	"github.com/qrave1/atlas/internal/config"
-	"github.com/qrave1/atlas/internal/planner"
+	"github.com/qrave1/atlas/internal/service/planner"
 )
 
 type Transcriber interface {
@@ -24,14 +25,22 @@ type Bot struct {
 	log         *slog.Logger
 }
 
-func New(telegram *tele.Bot, service *planner.Service, repo planner.Repository, transcriber Transcriber, logger *slog.Logger) *Bot {
-	return &Bot{telegram, service, repo, transcriber, logger}
+func New(ctx context.Context, cfg config.Telegram, service *planner.Service, repo planner.Repository, transcriber Transcriber, logger *slog.Logger) (*Bot, error) {
+	client, err := cfg.HTTPClient()
+	if err != nil {
+		return nil, err
+	}
+	api, err := newTelegram(ctx, tele.Settings{Token: cfg.Token, Client: client, Updates: 1}, logger.With("proxy_enabled", cfg.ProxyURL != ""))
+	if err != nil {
+		return nil, err
+	}
+	return &Bot{api, service, repo, transcriber, logger}, nil
 }
 
 func (b *Bot) Run(ctx context.Context) error {
 
-	if err := retry(ctx, func() error { return b.telegram.RemoveWebhook(false) }); err != nil {
-		return err
+	if err := retryTelegram(ctx, func() error { return b.telegram.RemoveWebhook(false) }); err != nil {
+		return fmt.Errorf("deleteWebhook: %w", err)
 	}
 	for ctx.Err() == nil {
 		state, err := b.repo.Load(ctx)
@@ -88,8 +97,8 @@ func (b *Bot) handleUpdate(ctx context.Context, u tele.Update) error {
 	var err error
 
 	if u.Callback != nil {
-		if err = retry(ctx, func() error { return b.telegram.Respond(u.Callback) }); err != nil {
-			b.log.Warn("Callback acknowledgement failed")
+		if err = retryTelegram(ctx, func() error { return b.telegram.Respond(u.Callback) }); err != nil {
+			b.log.Warn("Callback acknowledgement failed", "error", err)
 		}
 		kind, id, ok := strings.Cut(u.Callback.Data, ":")
 		if !ok {
@@ -180,9 +189,10 @@ func Authorized(u tele.Update) bool {
 		message.Chat.ID == config.OwnerID && message.Chat.Type == tele.ChatPrivate
 }
 
+// Poll uses the persisted offset. Telebot exposes batch getUpdates only through Raw.
 func pollUpdates(ctx context.Context, api *tele.Bot, offset int64) ([]tele.Update, error) {
 	var response struct{ Result []tele.Update }
-	err := retry(ctx, func() error {
+	err := retryTelegram(ctx, func() error {
 		data, err := api.Raw("getUpdates", map[string]any{"offset": offset, "timeout": 40, "limit": 10, "allowed_updates": []string{"message", "callback_query"}})
 		if err != nil {
 			return err

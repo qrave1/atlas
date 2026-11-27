@@ -1,4 +1,4 @@
-package bot
+package service
 
 import (
 	"context"
@@ -43,7 +43,7 @@ const maxVoiceBytes = 20 << 20
 
 func downloadVoice(ctx context.Context, api *tele.Bot, file tele.File) ([]byte, error) {
 	var body io.ReadCloser
-	err := retry(ctx, func() error { var err error; body, err = api.File(&file); return err })
+	err := retryTelegram(ctx, func() error { var err error; body, err = api.File(&file); return err })
 	if err != nil {
 		return nil, err
 	}

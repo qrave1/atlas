@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/urfave/cli/v3"
-	tele "gopkg.in/telebot.v4"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -12,11 +10,14 @@ import (
 	"time"
 	_ "time/tzdata"
 
-	"github.com/qrave1/atlas/internal/ai"
-	"github.com/qrave1/atlas/internal/bot"
-	"github.com/qrave1/atlas/internal/calendar"
+	"github.com/urfave/cli/v3"
+
+	"github.com/qrave1/atlas/internal/clients/ai"
+	"github.com/qrave1/atlas/internal/clients/calendar"
+
 	"github.com/qrave1/atlas/internal/config"
-	"github.com/qrave1/atlas/internal/planner"
+	"github.com/qrave1/atlas/internal/service"
+	"github.com/qrave1/atlas/internal/service/planner"
 	"github.com/qrave1/atlas/internal/store"
 )
 
@@ -38,30 +39,19 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	telegramHTTP, err := config.HTTPClient(cfg.Telegram.ProxyURL, 70*time.Second)
-	if err != nil {
-		return err
-	}
-	directHTTP, err := config.HTTPClient("", 90*time.Second)
-	if err != nil {
-		return err
-	}
-	googleHTTP, err := calendar.AuthorizedClient(ctx, directHTTP, cfg.Google.CredentialsFile, cfg.Google.TokenFile)
-	if err != nil {
-		return err
-	}
+	directHTTP := config.DirectHTTPClient(90 * time.Second)
 	brain := ai.New(directHTTP, cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.ChatModel, cfg.AI.TranscribeModel)
-	cal, err := calendar.New(ctx, googleHTTP, cfg.Google.CalendarID, state.InstallationID, location)
+	cal, err := calendar.New(ctx, directHTTP, cfg.Google, state.InstallationID, location)
 	if err != nil {
 		return err
 	}
-	service := planner.New(repo, brain, cal, location)
-	telegram, err := bot.NewTelegramClient(ctx, tele.Settings{Token: cfg.Telegram.Token, Client: telegramHTTP, Offline: true, Updates: 1})
+	plans := planner.New(repo, brain, cal, location)
+	bot, err := service.New(ctx, cfg.Telegram, plans, repo, brain, logger)
 	if err != nil {
 		return err
 	}
 	logger.Info("Atlas started", "owner_id", config.OwnerID, "telegram_proxy_enabled", cfg.Telegram.ProxyURL != "")
-	return bot.New(telegram, service, repo, brain, logger).Run(ctx)
+	return bot.Run(ctx)
 }
 
 func main() {

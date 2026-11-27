@@ -1,11 +1,13 @@
-package bot
+package service
 
 import (
 	"context"
-	"github.com/qrave1/atlas/internal/config"
-	"github.com/qrave1/atlas/internal/planner"
-	tele "gopkg.in/telebot.v4"
 	"time"
+
+	tele "gopkg.in/telebot.v4"
+
+	"github.com/qrave1/atlas/internal/config"
+	"github.com/qrave1/atlas/internal/service/planner"
 )
 
 func sendReply(ctx context.Context, api *tele.Bot, reply planner.Reply) error {
@@ -27,7 +29,7 @@ func sendReply(ctx context.Context, api *tele.Bot, reply planner.Reply) error {
 				{Text: "Отменить", Data: "cancel:" + reply.ProposalID},
 			}}}
 		}
-		if err := retry(ctx, func() error {
+		if err := retryTelegram(ctx, func() error {
 			_, err := api.Send(tele.ChatID(config.OwnerID), text, opts)
 			return err
 		}); err != nil {

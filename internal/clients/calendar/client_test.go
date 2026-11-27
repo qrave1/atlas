@@ -3,11 +3,12 @@ package calendar
 import (
 	"context"
 	"encoding/json"
-	gcalendar "google.golang.org/api/calendar/v3"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	gcalendar "google.golang.org/api/calendar/v3"
 
 	"github.com/qrave1/atlas/internal/model"
 )
@@ -94,7 +95,7 @@ func TestUpdateSendsETagAndPreservesPrivateMetadata(t *testing.T) {
 
 func newTestClient(t *testing.T, server *httptest.Server, owner string) *Client {
 	t.Helper()
-	client, err := New(context.Background(), server.Client(), "primary", owner, time.UTC)
+	client, err := newClient(context.Background(), server.Client(), "primary", owner, time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}

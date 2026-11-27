@@ -11,6 +11,7 @@ import (
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 
+	"github.com/qrave1/atlas/internal/config"
 	"github.com/qrave1/atlas/internal/model"
 )
 
@@ -25,7 +26,15 @@ type Client struct {
 	location       *time.Location
 }
 
-func New(ctx context.Context, client *http.Client, calendarID, installationID string, location *time.Location) (*Client, error) {
+func New(ctx context.Context, base *http.Client, cfg config.Google, installationID string, loc *time.Location) (*Client, error) {
+	client, err := authorizedClient(ctx, base, cfg.CredentialsFile, cfg.TokenFile)
+	if err != nil {
+		return nil, err
+	}
+	return newClient(ctx, client, cfg.CalendarID, installationID, loc)
+}
+
+func newClient(ctx context.Context, client *http.Client, calendarID, installationID string, location *time.Location) (*Client, error) {
 	api, err := gcalendar.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
 		return nil, fmt.Errorf("create calendar client: %w", err)
@@ -42,18 +51,19 @@ func calendarError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if apiStatus(err, http.StatusNotFound) || apiStatus(err, http.StatusGone) {
-		return ErrNotFound
-	}
-	if apiStatus(err, http.StatusPreconditionFailed) {
-		return ErrChanged
-	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
 	var apiErr *googleapi.Error
 	if errors.As(err, &apiErr) {
-		return fmt.Errorf("calendar http %d", apiErr.Code)
+		switch apiErr.Code {
+		case http.StatusNotFound, http.StatusGone:
+			return ErrNotFound
+		case http.StatusPreconditionFailed:
+			return ErrChanged
+		default:
+			return fmt.Errorf("calendar http %d", apiErr.Code)
+		}
 	}
 	// The SDK error may contain request URLs or response data; keep those private.
 	return fmt.Errorf("calendar request failed")
@@ -106,12 +116,33 @@ func (c *Client) GetOwned(ctx context.Context, id string) (model.Event, error) {
 	return c.fromEvent(event)
 }
 
-func list(ctx context.Context, call *gcalendar.EventsListCall) ([]*gcalendar.Event, error) {
-	events := []*gcalendar.Event{}
-	err := call.MaxResults(2500).Pages(ctx, func(page *gcalendar.Events) error {
-		events = append(events, page.Items...)
-		if len(events) > 10000 {
+func (c *Client) ListOwned(ctx context.Context, owned map[string]bool) ([]model.Event, error) {
+	query := c.api.Events.List(c.calendarID).PrivateExtendedProperty("atlas_owner=" + c.installationID)
+	return c.listEvents(ctx, query, func(e *gcalendar.Event) bool { return owned[e.Id] })
+}
+
+func (c *Client) Busy(ctx context.Context, start, end time.Time) ([]model.Event, error) {
+	query := c.api.Events.List(c.calendarID).TimeMin(start.Format(time.RFC3339)).TimeMax(end.Format(time.RFC3339)).SingleEvents(true)
+	return c.listEvents(ctx, query, func(e *gcalendar.Event) bool { return e.Transparency != "transparent" })
+}
+
+func (c *Client) listEvents(ctx context.Context, query *gcalendar.EventsListCall, include func(*gcalendar.Event) bool) ([]model.Event, error) {
+	events := []model.Event{}
+	count := 0
+	err := query.MaxResults(2500).Pages(ctx, func(page *gcalendar.Events) error {
+		count += len(page.Items)
+		if count > 10000 {
 			return fmt.Errorf("calendar result exceeds safety limit")
+		}
+		for _, event := range page.Items {
+			if event.Status == "cancelled" || !include(event) {
+				continue
+			}
+			item, err := c.fromEvent(event)
+			if err != nil {
+				return err
+			}
+			events = append(events, item)
 		}
 		return nil
 	})
@@ -120,45 +151,6 @@ func list(ctx context.Context, call *gcalendar.EventsListCall) ([]*gcalendar.Eve
 	}
 	return events, nil
 }
-
-func (c *Client) ListOwned(ctx context.Context, owned map[string]bool) ([]model.Event, error) {
-	events, err := list(ctx, c.api.Events.List(c.calendarID).PrivateExtendedProperty("atlas_owner="+c.installationID))
-	if err != nil {
-		return nil, err
-	}
-	result := []model.Event{}
-	for _, event := range events {
-		if !owned[event.Id] || event.Status == "cancelled" {
-			continue
-		}
-		item, err := c.fromEvent(event)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, item)
-	}
-	return result, nil
-}
-
-func (c *Client) Busy(ctx context.Context, start, end time.Time) ([]model.Event, error) {
-	events, err := list(ctx, c.api.Events.List(c.calendarID).TimeMin(start.Format(time.RFC3339)).TimeMax(end.Format(time.RFC3339)).SingleEvents(true))
-	if err != nil {
-		return nil, err
-	}
-	result := []model.Event{}
-	for _, event := range events {
-		if event.Status == "cancelled" || event.Transparency == "transparent" {
-			continue
-		}
-		item, err := c.fromEvent(event)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, item)
-	}
-	return result, nil
-}
-
 func (c *Client) desired(action model.Action, operation string) *gcalendar.Event {
 	return &gcalendar.Event{
 		Id: action.EventID, Summary: action.Title, Description: action.Description,
