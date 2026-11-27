@@ -23,7 +23,7 @@ services:
               bind:
                   create_host_path: false
         labels:
-            - "com.centurylinklabs.watchtower.enable=false"
+            - "com.centurylinklabs.watchtower.enable=true"
 
 volumes:
     atlas-data:
