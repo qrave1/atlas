@@ -1,27 +1,20 @@
-package main
+package app
 
 import (
 	"context"
-	"errors"
 	"log/slog"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 	_ "time/tzdata"
 
-	"github.com/urfave/cli/v3"
-
 	"github.com/qrave1/atlas/internal/clients/ai"
 	"github.com/qrave1/atlas/internal/clients/calendar"
-
 	"github.com/qrave1/atlas/internal/config"
 	"github.com/qrave1/atlas/internal/service"
 	"github.com/qrave1/atlas/internal/service/planner"
 	"github.com/qrave1/atlas/internal/store"
 )
 
-func run(ctx context.Context, logger *slog.Logger) error {
+func RunAtlas(ctx context.Context, logger *slog.Logger) error {
 	cfg, err := config.New()
 	if err != nil {
 		return err
@@ -53,19 +46,4 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	}
 	logger.Info("Atlas started", "owner_id", config.OwnerID, "telegram_proxy_enabled", cfg.Telegram.ProxyURL != "")
 	return bot.Run(ctx)
-}
-
-func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-	command := newCommand(func(ctx context.Context) error { return run(ctx, logger) }, calendar.Authorize)
-	if err := command.Run(ctx, os.Args); err != nil && !errors.Is(err, context.Canceled) {
-		logger.Error("Atlas stopped", "error", err)
-		var exitCoder cli.ExitCoder
-		if errors.As(err, &exitCoder) {
-			os.Exit(exitCoder.ExitCode())
-		}
-		os.Exit(1)
-	}
 }

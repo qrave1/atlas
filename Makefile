@@ -4,4 +4,4 @@ test:
 check:
 	go vet ./...
 build:
-	go build -o bin/atlas ./cmd/atlas
+	go build -o bin/atlas .
