@@ -41,6 +41,23 @@ func addHistory(state *model.State, role, content string) {
 	}
 }
 
+func pausedTask(task model.Task, tasks map[string]model.Task) bool {
+	if task.Status == "paused" {
+		return true
+	}
+	for parentID := task.ParentID; parentID != ""; {
+		parent, ok := tasks[parentID]
+		if !ok {
+			return false
+		}
+		if parent.Status == "paused" {
+			return true
+		}
+		parentID = parent.ParentID
+	}
+	return false
+}
+
 func (s *Service) Invalidate(ctx context.Context) error {
 	state, err := s.repo.Load(ctx)
 	if err != nil || state.TaskPending == nil {
@@ -110,11 +127,20 @@ func (s *Service) prepare(ctx context.Context, state *model.State, proposal *mod
 		switch action.Kind {
 		case "create":
 			action.TaskID, action.Before = "", nil
+			if action.Type == "" {
+				action.Type = "task"
+			}
+			if action.Type != "task" && action.Type != "epic" {
+				return errors.New("тип должен быть task или epic")
+			}
 			if action.ParentID != "" && action.ParentIndex != nil {
 				return errors.New("подзадача должна ссылаться на один эпик")
 			}
 			if action.ParentID != "" && state.Tasks[action.ParentID].ID == "" {
 				return errors.New("эпик должен быть создан Atlas")
+			}
+			if action.ParentID != "" && state.Tasks[action.ParentID].Status == "completed" {
+				return errors.New("нельзя добавлять задачи в завершённый эпик")
 			}
 			if action.ParentIndex != nil {
 				parentIndex := *action.ParentIndex
@@ -131,14 +157,23 @@ func (s *Service) prepare(ctx context.Context, state *model.State, proposal *mod
 			if err := s.validateNoOverlap(state, proposal, i, action); err != nil {
 				return err
 			}
-		case "update", "delete", "complete":
+		case "update", "delete", "complete", "pause", "resume":
 			if state.Tasks[action.TaskID].ID == "" {
 				return errors.New("можно менять только задачи, созданные Atlas")
+			}
+			if (action.Kind == "pause" || action.Kind == "resume") && state.Tasks[action.TaskID].Type != "epic" {
+				return errors.New("приостанавливать и возобновлять можно только эпик")
 			}
 			if seen[action.TaskID] {
 				return errors.New("несколько изменений одной задачи нужно объединить")
 			}
 			seen[action.TaskID] = true
+			if action.Kind == "pause" && state.Tasks[action.TaskID].Status != "active" {
+				return errors.New("на паузу можно поставить только активный эпик")
+			}
+			if action.Kind == "resume" && state.Tasks[action.TaskID].Status != "paused" {
+				return errors.New("возобновить можно только эпик на паузе")
+			}
 			if action.Kind == "delete" {
 				for _, child := range state.Tasks {
 					if child.ParentID == action.TaskID {
@@ -158,6 +193,9 @@ func (s *Service) prepare(ctx context.Context, state *model.State, proposal *mod
 				return errors.New("не удалось проверить исходную задачу; обновите /tasks")
 			}
 			action.Before = &before
+			if action.Kind == "pause" || action.Kind == "resume" {
+				continue
+			}
 			if action.Kind == "update" {
 				if err := s.validateTask(action.Title, action.Notes, action.DueDate); err != nil {
 					return err
@@ -299,10 +337,18 @@ func (s *Service) render(proposal *model.TaskProposal) string {
 			fmt.Fprintf(&b, "Удалить «%s»\n", action.Before.Title)
 		case "complete":
 			fmt.Fprintf(&b, "Завершить «%s»\n", action.Before.Title)
+		case "pause":
+			fmt.Fprintf(&b, "Поставить эпик «%s» на паузу\n", action.Before.Title)
+		case "resume":
+			fmt.Fprintf(&b, "Возобновить эпик «%s»\n", action.Before.Title)
 		case "update":
 			fmt.Fprintf(&b, "Изменить «%s» → «%s»\n", action.Before.Title, action.Title)
 		default:
-			fmt.Fprintf(&b, "Создать «%s»\n", action.Title)
+			if action.Type == "epic" {
+				fmt.Fprintf(&b, "Создать эпик «%s»\n", action.Title)
+			} else {
+				fmt.Fprintf(&b, "Создать «%s»\n", action.Title)
+			}
 		}
 		if action.DueDate != "" {
 			date, _ := time.ParseInLocation("2006-01-02", action.DueDate, s.location)
@@ -356,6 +402,10 @@ func (s *Service) Tasks(ctx context.Context) (model.Reply, error) {
 			}
 		}
 	}
+	taskMap := make(map[string]model.Task, len(tasks))
+	for _, task := range tasks {
+		taskMap[task.ID] = task
+	}
 	count := 0
 	for _, task := range tasks {
 		if task.ParentID != "" {
@@ -366,6 +416,10 @@ func (s *Service) Tasks(ctx context.Context) (model.Reply, error) {
 		status := ""
 		if task.Status == "completed" {
 			status = "✓ "
+		} else if pausedTask(task, taskMap) {
+			status = "⏸ "
+		} else if task.Type == "epic" {
+			status = "◆ "
 		}
 		fmt.Fprintf(&b, "%s%s\n", status, task.Title)
 		if task.ParentID == "" && children[task.ID] > 0 {
@@ -394,6 +448,192 @@ func (s *Service) Tasks(ctx context.Context) (model.Reply, error) {
 		b.WriteString("Пока нет задач.")
 	}
 	return model.Reply{Text: b.String()}, nil
+}
+
+func (s *Service) Epics(ctx context.Context) (model.Reply, error) {
+	tasks, err := s.tasks.List(ctx)
+	if err != nil {
+		return model.Reply{}, err
+	}
+	epics := make([]model.Task, 0)
+	for _, task := range tasks {
+		if task.Type == "epic" {
+			epics = append(epics, task)
+		}
+	}
+	sort.Slice(epics, func(i, j int) bool {
+		if epics[i].Status != epics[j].Status {
+			return epics[i].Status < epics[j].Status
+		}
+		return epics[i].Title < epics[j].Title
+	})
+	reply := model.Reply{Text: "Эпики Atlas:\n"}
+	if len(epics) == 0 {
+		reply.Text += "\nПока нет эпиков. Создай цель, например: «Создай эпик по подготовке к экзаменам»."
+	} else {
+		for _, epic := range epics {
+			done, total := epicProgress(epic.ID, tasks)
+			status := "активен"
+			if epic.Status == "paused" {
+				status = "пауза"
+			} else if epic.Status == "completed" {
+				status = "завершён"
+			}
+			reply.Text += fmt.Sprintf("\n\n◆ %s — %d/%d, %s", epic.Title, done, total, status)
+			if epic.RepeatReminder {
+				reply.Text += ", важный"
+			}
+			reply.Buttons = append(reply.Buttons, []model.Button{{Text: "Открыть: " + truncate(epic.Title, 24), Data: "epic:open:" + epic.ID}})
+		}
+	}
+	reply.Buttons = append(reply.Buttons, []model.Button{{Text: "＋ Создать эпик", Data: "epic:create"}})
+	return reply, nil
+}
+
+func epicProgress(epicID string, tasks []model.Task) (done, total int) {
+	for _, task := range tasks {
+		if task.ParentID == epicID {
+			total++
+			if task.Status == "completed" {
+				done++
+			}
+		}
+	}
+	return done, total
+}
+
+func taskValues(tasks map[string]model.Task) []model.Task {
+	result := make([]model.Task, 0, len(tasks))
+	for _, task := range tasks {
+		result = append(result, task)
+	}
+	return result
+}
+
+func (s *Service) EpicAction(ctx context.Context, action, epicID string) (model.Reply, error) {
+	if action == "create" {
+		state, err := s.repo.Load(ctx)
+		if err != nil {
+			return model.Reply{}, err
+		}
+		state.EpicInputID, state.EpicInputMode, state.RescheduleTaskID = "", "create", ""
+		if err = s.repo.Save(ctx, state); err != nil {
+			return model.Reply{}, err
+		}
+		return model.Reply{Text: "Как назвать эпик? Добавь предмет или курс и срок, если он известен. Для учебных эпиков Atlas включит повторные напоминания; сразу разбить на подзадачи можно отдельной просьбой."}, nil
+	}
+	if action == "list" {
+		return s.Epics(ctx)
+	}
+	state, err := s.repo.Load(ctx)
+	if err != nil {
+		return model.Reply{}, err
+	}
+	epic, ok := state.Tasks[epicID]
+	if !ok || epic.Type != "epic" {
+		return model.Reply{Text: "Эпик не найден. Используй /epics, чтобы открыть список."}, nil
+	}
+	if epic.Status == "completed" && (action == "add" || action == "breakdown" || action == "pause" || action == "resume") {
+		return model.Reply{Text: "Эпик уже завершён. Для продолжения создай новый эпик или попроси Atlas изменить его статус."}, nil
+	}
+	tasks, err := s.tasks.List(ctx)
+	if err != nil {
+		return model.Reply{}, err
+	}
+	done, total := epicProgress(epicID, tasks)
+	switch action {
+	case "open":
+		status := "активен"
+		if epic.Status == "paused" {
+			status = "на паузе"
+		} else if epic.Status == "completed" {
+			status = "завершён"
+		}
+		text := fmt.Sprintf("◆ %s\nСтатус: %s\nПодзадачи: %d/%d завершено", epic.Title, status, done, total)
+		if epic.RepeatReminder {
+			text += "\nПовторные напоминания: включены"
+		}
+		if epic.DueDate != "" {
+			if due, parseErr := time.ParseInLocation("2006-01-02", epic.DueDate, s.location); parseErr == nil {
+				text += "\nСрок: " + due.Format("02.01.2006")
+			}
+		}
+		for _, task := range tasks {
+			if task.ParentID != epicID {
+				continue
+			}
+			mark := "▫"
+			if task.Status == "completed" {
+				mark = "✓"
+			}
+			text += "\n" + mark + " " + task.Title
+		}
+		reply := model.Reply{Text: text}
+		if epic.Status != "completed" {
+			reply.Buttons = append(reply.Buttons,
+				[]model.Button{{Text: "＋ Добавить задачу", Data: "epic:add:" + epicID}},
+				[]model.Button{{Text: "Разбить эпик на шаги", Data: "epic:breakdown:" + epicID}},
+			)
+		}
+		if epic.Status == "paused" {
+			reply.Buttons = append(reply.Buttons, []model.Button{{Text: "▶ Возобновить", Data: "epic:resume:" + epicID}})
+		} else if epic.Status != "completed" {
+			reply.Buttons = append(reply.Buttons, []model.Button{{Text: "⏸ Пауза", Data: "epic:pause:" + epicID}})
+		}
+		if done == total && epic.Status != "completed" {
+			reply.Buttons = append(reply.Buttons, []model.Button{{Text: "Завершить эпик", Data: "epic:complete:" + epicID}})
+		} else if epic.Status != "completed" {
+			text += fmt.Sprintf("\n\nЗакрыть эпик пока нельзя: осталось %d незавершённых подзадач.", total-done)
+			reply.Text = text
+		}
+		reply.Buttons = append(reply.Buttons, []model.Button{{Text: "← Все эпики", Data: "epic:list"}})
+		return reply, nil
+	case "add", "breakdown":
+		state.EpicInputID, state.EpicInputMode, state.RescheduleTaskID = epicID, action, ""
+		if err = s.repo.Save(ctx, state); err != nil {
+			return model.Reply{}, err
+		}
+		if action == "add" {
+			return model.Reply{Text: "Опиши задачу для эпика «" + epic.Title + "». После этого покажу черновик для подтверждения."}, nil
+		}
+		return model.Reply{Text: "Опиши, к какому результату ведёт эпик «" + epic.Title + "». Atlas предложит подзадачи и покажет план для подтверждения."}, nil
+	case "pause", "resume", "complete", "delete":
+		if action == "complete" && done != total {
+			return model.Reply{Text: fmt.Sprintf("Нельзя закрыть эпик «%s»: осталось %d незавершённых подзадач. Сначала заверши их.", epic.Title, total-done)}, nil
+		}
+		if action == "delete" && total > 0 {
+			return model.Reply{Text: fmt.Sprintf("Нельзя удалить эпик «%s», пока в нём есть подзадачи. Удали их отдельно.", epic.Title)}, nil
+		}
+		if action == "pause" && epic.Status == "paused" || action == "resume" && epic.Status != "paused" {
+			return model.Reply{Text: "Статус эпика уже изменён. Обнови /epics."}, nil
+		}
+		kind := action
+		if action == "delete" {
+			kind = "delete"
+		}
+		return s.proposeEpicChange(ctx, epic, kind)
+	default:
+		return model.Reply{Text: "Неизвестное действие с эпиком."}, nil
+	}
+}
+
+func (s *Service) proposeEpicChange(ctx context.Context, epic model.Task, kind string) (model.Reply, error) {
+	if err := s.Invalidate(ctx); err != nil {
+		return model.Reply{}, err
+	}
+	state, err := s.repo.Load(ctx)
+	if err != nil {
+		return model.Reply{}, err
+	}
+	proposal := &model.TaskProposal{ID: store.NewID(), CreatedAt: s.now(), Status: "ready", Actions: []model.TaskAction{{Kind: kind, TaskID: epic.ID}}}
+	if err := s.prepare(ctx, &state, proposal); err != nil {
+		return model.Reply{Text: "Не удалось подготовить действие с эпиком: " + err.Error()}, nil
+	}
+	state.TaskPending = proposal
+	if err := s.repo.Save(ctx, state); err != nil {
+		return model.Reply{}, err
+	}
+	return model.Reply{Text: s.render(proposal), ProposalID: proposal.ID}, nil
 }
 
 // Today starts the daily planning flow. Task selection stays local to Atlas.
@@ -436,7 +676,7 @@ func (s *Service) Today(ctx context.Context) (model.Reply, error) {
 	reply := model.Reply{Text: "План на " + s.now().In(s.location).Format("02.01") + ":\n"}
 	shown := 0
 	for _, task := range tasks {
-		if task.Status == "completed" || (task.ParentID == "" && parents[task.ID]) {
+		if task.Status == "completed" || pausedTask(task, state.Tasks) || (task.ParentID == "" && parents[task.ID]) {
 			continue
 		}
 		if task.DueDate != "" && task.DueDate > today {
@@ -559,7 +799,7 @@ func (s *Service) Scheduled(ctx context.Context) ([]model.Reply, error) {
 		}
 		var buttons [][]model.Button
 		for _, task := range tasks {
-			if selected[task.ID] && task.Status != "completed" {
+			if selected[task.ID] && task.Status != "completed" && !pausedTask(task, state.Tasks) {
 				text += "\n▫ " + task.Title
 				buttons = append(buttons, []model.Button{{Text: "Готово", Data: "daily:complete:" + task.ID}, {Text: "Завтра", Data: "daily:tomorrow:" + task.ID}, {Text: "Оставить", Data: "daily:remove:" + task.ID}})
 			}
@@ -573,7 +813,7 @@ func (s *Service) Scheduled(ctx context.Context) ([]model.Reply, error) {
 	}
 	dueReminders := make([]model.Task, 0)
 	for _, task := range state.Tasks {
-		if task.Status != "completed" && !task.NextReminderAt.IsZero() && !task.NextReminderAt.After(now) {
+		if task.Status != "completed" && !pausedTask(task, state.Tasks) && !task.NextReminderAt.IsZero() && !task.NextReminderAt.After(now) {
 			dueReminders = append(dueReminders, task)
 		}
 	}
@@ -635,10 +875,16 @@ func (s *Service) Reminder(ctx context.Context, action, taskID string) (model.Re
 	if !ok || task.Status == "completed" {
 		return model.Reply{Text: "Задача уже завершена или удалена."}, nil
 	}
+	if pausedTask(task, state.Tasks) {
+		return model.Reply{Text: "Эпик на паузе, поэтому его напоминания временно остановлены."}, nil
+	}
 	now := s.now().In(s.location)
 	switch action {
 	case "done":
 		_, err = s.tasks.Apply(ctx, model.TaskAction{Kind: "complete", TaskID: task.ID, Before: &task}, "reminder-done-"+store.NewID(), "")
+		if errors.Is(err, errEpicHasOpenTask) {
+			return model.Reply{Text: "Нельзя закрыть эпик, пока в нём есть незавершённые подзадачи. Открой /epics, чтобы посмотреть прогресс."}, nil
+		}
 		if err != nil {
 			return model.Reply{}, err
 		}
@@ -734,6 +980,12 @@ func (s *Service) Confirm(ctx context.Context, id string) (model.Reply, error) {
 			if action.Kind == "create" {
 				continue
 			}
+			if action.Kind == "complete" && state.Tasks[action.TaskID].Type == "epic" {
+				if done, total := epicProgress(action.TaskID, taskValues(state.Tasks)); done != total {
+					proposal.Status = "superseded"
+					return model.Reply{Text: fmt.Sprintf("Нельзя закрыть эпик: осталось %d незавершённых подзадач. Проверь /epics.", total-done)}, s.repo.Save(ctx, state)
+				}
+			}
 			current, checkErr := s.tasks.Get(ctx, action.TaskID)
 			if checkErr != nil || action.Before == nil || current.ETag != action.Before.ETag {
 				proposal.Status = "superseded"
@@ -761,6 +1013,16 @@ func (s *Service) applyConfirmed(ctx context.Context, state model.State) (model.
 		}
 		taskID, err := s.tasks.Apply(ctx, action, proposal.ID+fmt.Sprintf("-%d", index), parentID)
 		if err != nil {
+			if errors.Is(err, errEpicHasOpenTask) {
+				state, loadErr := s.repo.Load(ctx)
+				if loadErr != nil {
+					return model.Reply{}, loadErr
+				}
+				if state.TaskPending != nil {
+					state.TaskPending.Status = "superseded"
+				}
+				return model.Reply{Text: "Нельзя закрыть эпик, пока в нём есть незавершённые подзадачи. Открой /epics."}, s.repo.Save(ctx, state)
+			}
 			if errors.Is(err, errTaskChanged) || errors.Is(err, errTaskNotFound) {
 				return model.Reply{Text: fmt.Sprintf("Выполнено %d из %d. Задача изменилась вне бота или не принадлежит ему. Используйте /discard, проверьте /tasks и составьте новый план.", proposal.Completed, len(proposal.Actions))}, nil
 			}
@@ -813,6 +1075,7 @@ func (s *Service) Cancel(ctx context.Context, id string, discard bool) (model.Re
 	}
 	state.TaskPending = nil
 	state.RescheduleTaskID = ""
+	state.EpicInputID, state.EpicInputMode = "", ""
 	state.History = nil
 	return model.Reply{Text: "Текущий диалог и оставшиеся действия отменены. Уже записанные задачи сохранены. /tasks — проверить список."}, s.repo.Save(ctx, state)
 }

@@ -15,8 +15,8 @@ const (
 	defaultSpeech = "openai/whisper-large-v3"
 )
 
-var chatModels = [...]string{defaultChat, "openai/gpt-5-mini"}
-var speechModels = [...]string{defaultSpeech, "openai/gpt-4o-mini-transcribe"}
+var chatModels = [...]string{defaultChat, "openai/gpt-oss-20b", "openai/gpt-oss-120b", "openai/gpt-5-nano"}
+var speechModels = [...]string{defaultSpeech}
 
 func (b *Bot) currentModels(ctx context.Context) (string, string, error) {
 	state, err := b.repo.Load(ctx)

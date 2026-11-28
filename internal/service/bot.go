@@ -147,6 +147,8 @@ type Assistant interface {
 	Invalidate(context.Context) error
 	Text(context.Context, string) (model.Reply, error)
 	Tasks(context.Context) (model.Reply, error)
+	Epics(context.Context) (model.Reply, error)
+	EpicAction(context.Context, string, string) (model.Reply, error)
 	Confirm(context.Context, string) (model.Reply, error)
 	Cancel(context.Context, string, bool) (model.Reply, error)
 	Resume(context.Context) (model.Reply, error)
@@ -273,6 +275,9 @@ func (b *Bot) handleUpdate(ctx context.Context, u tele.Update) error {
 		case "daily":
 			action, taskID, _ := strings.Cut(id, ":")
 			reply, err = b.assistant.DailyAction(ctx, action, taskID)
+		case "epic":
+			action, epicID, _ := strings.Cut(id, ":")
+			reply, err = b.assistant.EpicAction(ctx, action, epicID)
 		case "remind":
 			action, taskID, _ := strings.Cut(id, ":")
 			reply, err = b.assistant.Reminder(ctx, action, taskID)
@@ -310,9 +315,11 @@ func (b *Bot) handleUpdate(ctx context.Context, u tele.Update) error {
 		}
 		switch text {
 		case "/start", "/help":
-			reply.Text = "Я Atlas, ваш личный помощник и планировщик. Отправьте задачу голосом или текстом. Утренний план — ежедневно в 10:00, обзор — в 22:00 (МСК). Изменения, предложенные AI, записываются после подтверждения.\n\n/today — план на сегодня\n/settings — настройки моделей\n/tasks — мои задачи\n/cancel — отменить диалог\n/resume — продолжить прерванную запись\n/discard — прекратить оставшиеся действия без отката уже выполненных"
+			reply.Text = "Я Atlas, ваш личный помощник и планировщик. Отправьте задачу голосом или текстом. Утренний план — ежедневно в 10:00, обзор — в 22:00 (МСК). Изменения, предложенные AI, записываются после подтверждения.\n\n/today — план на сегодня\n/epics — учебные и другие крупные цели\n/settings — настройки моделей\n/tasks — мои задачи\n/cancel — отменить диалог\n/resume — продолжить прерванную запись\n/discard — прекратить оставшиеся действия без отката уже выполненных"
 		case "/settings", "/models":
 			return b.showSettings(ctx)
+		case "/epics":
+			reply, err = b.assistant.Epics(ctx)
 		case "/tasks":
 			reply, err = b.assistant.Tasks(ctx)
 		case "/cancel":
@@ -329,7 +336,21 @@ func (b *Bot) handleUpdate(ctx context.Context, u tele.Update) error {
 				if loadErr != nil {
 					return loadErr
 				}
-				if state.RescheduleTaskID != "" {
+				if state.EpicInputMode != "" {
+					epicID, mode := state.EpicInputID, state.EpicInputMode
+					state.EpicInputID, state.EpicInputMode = "", ""
+					if err = b.repo.Save(ctx, state); err != nil {
+						return err
+					}
+					switch mode {
+					case "create":
+						text = "Создай эпик type=epic: " + text
+					case "add":
+						text = "Добавь одну задачу в эпик task_id=" + epicID + ": " + text
+					case "breakdown":
+						text = "Разбей эпик task_id=" + epicID + " на конкретные подзадачи по этому запросу: " + text
+					}
+				} else if state.RescheduleTaskID != "" {
 					taskID := state.RescheduleTaskID
 					state.RescheduleTaskID = ""
 					if err = b.repo.Save(ctx, state); err != nil {

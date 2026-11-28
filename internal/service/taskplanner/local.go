@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	errTaskNotFound = errors.New("task not found")
-	errTaskChanged  = errors.New("task changed")
+	errTaskNotFound    = errors.New("task not found")
+	errTaskChanged     = errors.New("task changed")
+	errEpicHasOpenTask = errors.New("epic has unfinished subtasks")
 )
 
 type localTasks struct {
@@ -60,8 +61,20 @@ func (t localTasks) Apply(ctx context.Context, action model.TaskAction, operatio
 	switch action.Kind {
 	case "create":
 		id := store.NewID()
-		task := model.Task{ID: id, Title: action.Title, Notes: action.Notes, DueDate: action.DueDate,
-			EstimateMinutes: action.EstimateMinutes, RepeatReminder: action.RepeatReminder, Status: "needsAction",
+		typeName := action.Type
+		if typeName == "" {
+			typeName = "task"
+		}
+		status := "needsAction"
+		if typeName == "epic" {
+			status = "active"
+		}
+		repeatReminder := action.RepeatReminder
+		if parentID != "" && state.Tasks[parentID].RepeatReminder {
+			repeatReminder = true
+		}
+		task := model.Task{ID: id, Type: typeName, Title: action.Title, Notes: action.Notes, DueDate: action.DueDate,
+			EstimateMinutes: action.EstimateMinutes, RepeatReminder: repeatReminder, Status: status,
 			ParentID: parentID, ETag: store.NewID()}
 		if action.ScheduledAt != "" {
 			planned, parseErr := time.Parse(time.RFC3339, action.ScheduledAt)
@@ -77,12 +90,20 @@ func (t localTasks) Apply(ctx context.Context, action model.TaskAction, operatio
 			task.NextReminderAt = time.Date(due.Year(), due.Month(), due.Day(), 11, 0, 0, 0, t.location)
 		}
 		state.Tasks[id] = task
+		if parentID != "" {
+			parent := state.Tasks[parentID]
+			parent.Type, parent.ETag = "epic", store.NewID()
+			if parent.Status == "needsAction" {
+				parent.Status = "active"
+			}
+			state.Tasks[parentID] = parent
+		}
 		state.TaskOperations[operation] = id
 		if err = t.repo.Save(ctx, state); err != nil {
 			return "", err
 		}
 		return id, nil
-	case "update", "complete", "delete":
+	case "update", "complete", "delete", "pause", "resume":
 		task, ok := state.Tasks[action.TaskID]
 		if !ok {
 			return "", errTaskNotFound
@@ -96,8 +117,26 @@ func (t localTasks) Apply(ctx context.Context, action model.TaskAction, operatio
 				state.DailyPlanIDs = append(state.DailyPlanIDs[:index], state.DailyPlanIDs[index+1:]...)
 			}
 		} else if action.Kind == "complete" {
+			if task.Type == "epic" {
+				for _, child := range state.Tasks {
+					if child.ParentID == task.ID && child.Status != "completed" {
+						return "", errEpicHasOpenTask
+					}
+				}
+			}
 			task.Status = "completed"
 			task.NextReminderAt = time.Time{}
+			task.ETag = store.NewID()
+			state.Tasks[task.ID] = task
+		} else if action.Kind == "pause" || action.Kind == "resume" {
+			if task.Type != "epic" {
+				return "", errors.New("only epics can be paused")
+			}
+			if action.Kind == "pause" {
+				task.Status = "paused"
+			} else {
+				task.Status = "active"
+			}
 			task.ETag = store.NewID()
 			state.Tasks[task.ID] = task
 		} else {

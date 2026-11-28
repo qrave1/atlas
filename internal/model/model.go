@@ -22,6 +22,7 @@ type Button struct {
 
 type Task struct {
 	ID              string     `json:"id"`
+	Type            string     `json:"type,omitempty"`
 	Title           string     `json:"title"`
 	Notes           string     `json:"notes,omitempty"`
 	DueDate         string     `json:"due_date,omitempty"`
@@ -37,6 +38,7 @@ type Task struct {
 
 type TaskAction struct {
 	Kind            string `json:"kind"`
+	Type            string `json:"type,omitempty"`
 	TaskID          string `json:"task_id,omitempty"`
 	ParentID        string `json:"parent_task_id,omitempty"`
 	ParentIndex     *int   `json:"parent_index,omitempty"`
@@ -77,4 +79,6 @@ type State struct {
 	MorningSentDate    string            `json:"morning_sent_date,omitempty"`
 	EveningSentDate    string            `json:"evening_sent_date,omitempty"`
 	RescheduleTaskID   string            `json:"reschedule_task_id,omitempty"`
+	EpicInputID        string            `json:"epic_input_id,omitempty"`
+	EpicInputMode      string            `json:"epic_input_mode,omitempty"`
 }

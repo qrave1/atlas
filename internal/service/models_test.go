@@ -29,7 +29,7 @@ func TestSelectModelPersistsAndRejectsInvalid(t *testing.T) {
 		t.Fatal("invalid selection persisted")
 	}
 	state.ChatModel = chatModels[1]
-	state.TranscribeModel = speechModels[1]
+	state.TranscribeModel = speechModels[0]
 	if err := db.Save(ctx, state); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestSelectModelPersistsAndRejectsInvalid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if restored.ChatModel != chatModels[1] || restored.TranscribeModel != speechModels[1] {
+	if restored.ChatModel != chatModels[1] || restored.TranscribeModel != speechModels[0] {
 		t.Fatal("selection not persisted")
 	}
 }

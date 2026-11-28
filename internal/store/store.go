@@ -44,7 +44,7 @@ func New(ctx context.Context, path string) (*Store, error) {
 	s := &Store{db: db}
 	_, err = s.Load(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
-		state := model.State{InstallationID: NewID(), Tasks: map[string]model.Task{}, TaskOperations: map[string]string{}, TaskStorageVersion: 1}
+		state := model.State{InstallationID: NewID(), Tasks: map[string]model.Task{}, TaskOperations: map[string]string{}, TaskStorageVersion: 2}
 		err = s.Save(ctx, state)
 	}
 	if err != nil {
@@ -71,8 +71,8 @@ func (s *Store) Load(ctx context.Context) (model.State, error) {
 	if err := json.Unmarshal(raw, &state); err != nil {
 		return state, err
 	}
-	legacyState := state.TaskStorageVersion == 0
-	if legacyState {
+	migrated := false
+	if state.TaskStorageVersion == 0 {
 		// Old snapshots had no local task data; start the local planner with an empty task set.
 		state.Tasks = map[string]model.Task{}
 		state.TaskOperations = map[string]string{}
@@ -80,6 +80,7 @@ func (s *Store) Load(ctx context.Context) (model.State, error) {
 		state.DailyPlanIDs = nil
 		state.RescheduleTaskID = ""
 		state.TaskStorageVersion = 1
+		migrated = true
 	}
 	if state.Tasks == nil {
 		state.Tasks = map[string]model.Task{}
@@ -87,7 +88,29 @@ func (s *Store) Load(ctx context.Context) (model.State, error) {
 	if state.TaskOperations == nil {
 		state.TaskOperations = map[string]string{}
 	}
-	if legacyState {
+	if state.TaskStorageVersion < 2 {
+		parents := make(map[string]bool)
+		for _, task := range state.Tasks {
+			if task.ParentID != "" {
+				parents[task.ParentID] = true
+			}
+		}
+		for id, task := range state.Tasks {
+			if task.Type == "" {
+				task.Type = "task"
+				if parents[id] {
+					task.Type = "epic"
+					if task.Status == "needsAction" {
+						task.Status = "active"
+					}
+				}
+				state.Tasks[id] = task
+			}
+		}
+		state.TaskStorageVersion = 2
+		migrated = true
+	}
+	if migrated {
 		migrated, err := json.Marshal(state)
 		if err != nil {
 			return state, err
