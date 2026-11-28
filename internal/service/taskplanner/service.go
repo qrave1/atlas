@@ -387,6 +387,43 @@ func (s *Service) Tasks(ctx context.Context) (model.Reply, error) {
 		}
 		return tasks[i].DueDate < tasks[j].DueDate
 	})
+	taskMap := make(map[string]model.Task, len(tasks))
+	childrenByParent := make(map[string][]model.Task)
+	var roots []model.Task
+	for _, task := range tasks {
+		taskMap[task.ID] = task
+	}
+	for _, task := range tasks {
+		if task.ParentID == "" || taskMap[task.ParentID].ID == "" {
+			roots = append(roots, task)
+			continue
+		}
+		childrenByParent[task.ParentID] = append(childrenByParent[task.ParentID], task)
+	}
+	ordered := make([]model.Task, 0, len(tasks))
+	depths := make(map[string]int, len(tasks))
+	seen := make(map[string]bool, len(tasks))
+	var appendTree func(model.Task, int)
+	appendTree = func(task model.Task, depth int) {
+		if seen[task.ID] {
+			return
+		}
+		seen[task.ID] = true
+		ordered = append(ordered, task)
+		depths[task.ID] = depth
+		for _, child := range childrenByParent[task.ID] {
+			appendTree(child, depth+1)
+		}
+	}
+	for _, task := range roots {
+		appendTree(task, 0)
+	}
+	// Keep any cyclic or otherwise unreachable records visible as top-level items.
+	for _, task := range tasks {
+		if !seen[task.ID] {
+			appendTree(task, 0)
+		}
+	}
 	var b strings.Builder
 	b.WriteString("Задачи Atlas:\n")
 	children := make(map[string]int)
@@ -399,14 +436,11 @@ func (s *Service) Tasks(ctx context.Context) (model.Reply, error) {
 			}
 		}
 	}
-	taskMap := make(map[string]model.Task, len(tasks))
-	for _, task := range tasks {
-		taskMap[task.ID] = task
-	}
 	count := 0
-	for _, task := range tasks {
-		if task.ParentID != "" {
-			b.WriteString("  ↳ ")
+	for _, task := range ordered {
+		depth := depths[task.ID]
+		if depth > 0 {
+			b.WriteString(strings.Repeat("  ", depth-1) + "  └─ ")
 		} else {
 			b.WriteString("\n")
 		}
@@ -419,7 +453,7 @@ func (s *Service) Tasks(ctx context.Context) (model.Reply, error) {
 			status = "◆ "
 		}
 		fmt.Fprintf(&b, "%s%s\n", status, task.Title)
-		if task.ParentID == "" && children[task.ID] > 0 {
+		if children[task.ID] > 0 {
 			fmt.Fprintf(&b, "Подзадачи: %d/%d завершено\n", completedChildren[task.ID], children[task.ID])
 		}
 		if task.DueDate != "" {
