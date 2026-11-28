@@ -15,7 +15,7 @@ import (
 	tele "gopkg.in/telebot.v4"
 
 	"github.com/qrave1/atlas/internal/config"
-	"github.com/qrave1/atlas/internal/service/planner"
+	"github.com/qrave1/atlas/internal/model"
 )
 
 func TestAuthorization(t *testing.T) {
@@ -58,7 +58,7 @@ func TestTelegramHonorsRetryAfter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sendReply(t.Context(), tg, planner.Reply{Text: "Тест"}); err != nil {
+	if err := sendReply(t.Context(), tg, model.Reply{Text: "Тест"}); err != nil {
 		t.Fatal(err)
 	}
 	if attempts != 2 {
@@ -114,7 +114,7 @@ func TestReplyCarriesProposalButtons(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sendReply(t.Context(), api, planner.Reply{Text: "План", ProposalID: "abc"}); err != nil {
+	if err := sendReply(t.Context(), api, model.Reply{Text: "План", ProposalID: "abc"}); err != nil {
 		t.Fatal(err)
 	}
 	var markup tele.ReplyMarkup

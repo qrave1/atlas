@@ -8,61 +8,45 @@ type Message struct {
 }
 
 type Reply struct {
-	Text       string
-	ProposalID string
+	Text         string
+	ProposalID   string
+	Buttons      [][]Button
+	Schedule     string
+	ScheduleDate string
 }
 
-type Event struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Start       time.Time `json:"start"`
-	End         time.Time `json:"end"`
-	ETag        string    `json:"etag"`
-}
-
-type Action struct {
-	Kind          string    `json:"kind"`
-	EventID       string    `json:"event_id"`
-	Title         string    `json:"title"`
-	Description   string    `json:"description"`
-	Start         time.Time `json:"start"`
-	End           time.Time `json:"end"`
-	DurationKnown bool      `json:"duration_known"`
-	Before        *Event    `json:"before,omitempty"`
-}
-
-type Decision struct {
-	Reply   string   `json:"reply"`
-	Actions []Action `json:"actions"`
-}
-
-type Proposal struct {
-	ID        string    `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	Status    string    `json:"status"`
-	Actions   []Action  `json:"actions"`
-	Completed int       `json:"completed"`
+type Button struct {
+	Text string
+	Data string
 }
 
 type Task struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Notes    string `json:"notes,omitempty"`
-	DueDate  string `json:"due_date,omitempty"`
-	Status   string `json:"status"`
-	ParentID string `json:"parent_id,omitempty"`
-	ETag     string `json:"etag"`
+	ID              string     `json:"id"`
+	Title           string     `json:"title"`
+	Notes           string     `json:"notes,omitempty"`
+	DueDate         string     `json:"due_date,omitempty"`
+	ScheduledAt     *time.Time `json:"scheduled_at,omitempty"`
+	EstimateMinutes int        `json:"estimate_minutes,omitempty"`
+	RepeatReminder  bool       `json:"repeat_reminder,omitempty"`
+	NextReminderAt  time.Time  `json:"next_reminder_at,omitempty"`
+	SnoozeCount     int        `json:"snooze_count,omitempty"`
+	Status          string     `json:"status"`
+	ParentID        string     `json:"parent_id,omitempty"`
+	ETag            string     `json:"etag"`
 }
 
 type TaskAction struct {
-	Kind        string `json:"kind"`
-	TaskID      string `json:"task_id,omitempty"`
-	ParentIndex *int   `json:"parent_index,omitempty"`
-	Title       string `json:"title,omitempty"`
-	Notes       string `json:"notes,omitempty"`
-	DueDate     string `json:"due_date,omitempty"`
-	Before      *Task  `json:"before,omitempty"`
+	Kind            string `json:"kind"`
+	TaskID          string `json:"task_id,omitempty"`
+	ParentID        string `json:"parent_task_id,omitempty"`
+	ParentIndex     *int   `json:"parent_index,omitempty"`
+	Title           string `json:"title,omitempty"`
+	Notes           string `json:"notes,omitempty"`
+	DueDate         string `json:"due_date,omitempty"`
+	ScheduledAt     string `json:"scheduled_at,omitempty"`
+	EstimateMinutes int    `json:"estimate_minutes,omitempty"`
+	RepeatReminder  bool   `json:"repeat_reminder,omitempty"`
+	Before          *Task  `json:"before,omitempty"`
 }
 
 type TaskDecision struct {
@@ -79,13 +63,18 @@ type TaskProposal struct {
 }
 
 type State struct {
-	ChatModel       string          `json:"chat_model,omitempty"`
-	TranscribeModel string          `json:"transcribe_model,omitempty"`
-	InstallationID  string          `json:"installation_id"`
-	Offset          int64           `json:"offset"`
-	History         []Message       `json:"history"`
-	Owned           map[string]bool `json:"owned"`
-	Pending         *Proposal       `json:"pending,omitempty"`
-	TaskOwned       map[string]bool `json:"task_owned,omitempty"`
-	TaskPending     *TaskProposal   `json:"task_pending,omitempty"`
+	ChatModel          string            `json:"chat_model,omitempty"`
+	TranscribeModel    string            `json:"transcribe_model,omitempty"`
+	InstallationID     string            `json:"installation_id"`
+	TaskStorageVersion int               `json:"task_storage_version"`
+	Offset             int64             `json:"offset"`
+	History            []Message         `json:"history"`
+	Tasks              map[string]Task   `json:"tasks,omitempty"`
+	TaskOperations     map[string]string `json:"task_operations,omitempty"`
+	TaskPending        *TaskProposal     `json:"task_pending,omitempty"`
+	DailyPlanDate      string            `json:"daily_plan_date,omitempty"`
+	DailyPlanIDs       []string          `json:"daily_plan_ids,omitempty"`
+	MorningSentDate    string            `json:"morning_sent_date,omitempty"`
+	EveningSentDate    string            `json:"evening_sent_date,omitempty"`
+	RescheduleTaskID   string            `json:"reschedule_task_id,omitempty"`
 }

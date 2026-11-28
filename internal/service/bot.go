@@ -150,6 +150,11 @@ type Assistant interface {
 	Confirm(context.Context, string) (model.Reply, error)
 	Cancel(context.Context, string, bool) (model.Reply, error)
 	Resume(context.Context) (model.Reply, error)
+	Today(context.Context) (model.Reply, error)
+	DailyAction(context.Context, string, string) (model.Reply, error)
+	Scheduled(context.Context) ([]model.Reply, error)
+	ScheduleSent(context.Context, string, string) error
+	Reminder(context.Context, string, string) (model.Reply, error)
 }
 
 type StateRepository interface {
@@ -180,6 +185,9 @@ func (b *Bot) Run(ctx context.Context) error {
 		return fmt.Errorf("deleteWebhook: %w", err)
 	}
 	for ctx.Err() == nil {
+		if err := b.sendScheduled(ctx); err != nil {
+			b.log.Warn("Scheduled Telegram message failed", "error", err)
+		}
 		state, err := b.repo.Load(ctx)
 		if err != nil {
 			return err
@@ -199,11 +207,14 @@ func (b *Bot) Run(ctx context.Context) error {
 			}
 			continue
 		}
+		if err := b.sendScheduled(ctx); err != nil {
+			b.log.Warn("Scheduled Telegram message failed", "error", err)
+		}
 		for _, u := range updates {
 			if int64(u.ID) < state.Offset {
 				continue
 			}
-			// Authorization precedes acknowledgements, voice downloads, AI, and Google.
+			// Authorization precedes acknowledgements and all external requests.
 			if Authorized(u) {
 				opCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 				err = b.handleUpdate(opCtx, u)
@@ -244,10 +255,27 @@ func (b *Bot) handleUpdate(ctx context.Context, u tele.Update) error {
 		switch kind {
 		case "model":
 			return b.selectModel(ctx, id)
+		case "settings":
+			switch id {
+			case "open":
+				return b.showSettings(ctx)
+			case "chat", "speech":
+				return b.showModelChoices(ctx, id)
+			default:
+				return nil
+			}
 		case "confirm":
 			reply, err = b.assistant.Confirm(ctx, id)
 		case "cancel":
 			reply, err = b.assistant.Cancel(ctx, id, false)
+		case "today":
+			reply, err = b.assistant.Today(ctx)
+		case "daily":
+			action, taskID, _ := strings.Cut(id, ":")
+			reply, err = b.assistant.DailyAction(ctx, action, taskID)
+		case "remind":
+			action, taskID, _ := strings.Cut(id, ":")
+			reply, err = b.assistant.Reminder(ctx, action, taskID)
 		default:
 			return nil
 		}
@@ -282,9 +310,9 @@ func (b *Bot) handleUpdate(ctx context.Context, u tele.Update) error {
 		}
 		switch text {
 		case "/start", "/help":
-			reply.Text = "Я Atlas, ваш личный помощник. Отправьте задачу голосом или текстом. Если укажете точное время, уточню, подходит ли срок только датой: Google Tasks не хранит время суток. Декомпозиция — только по просьбе. Все изменения — после кнопки подтверждения.\n\n/models — выбор моделей\n/tasks — мои задачи\n/cancel — отменить диалог\n/resume — продолжить прерванную запись\n/discard — прекратить оставшиеся действия без отката уже выполненных"
-		case "/models":
-			return b.showModels(ctx)
+			reply.Text = "Я Atlas, ваш личный помощник и планировщик. Отправьте задачу голосом или текстом. Утренний план — ежедневно в 10:00, обзор — в 22:00 (МСК). Изменения, предложенные AI, записываются после подтверждения.\n\n/today — план на сегодня\n/settings — настройки моделей\n/tasks — мои задачи\n/cancel — отменить диалог\n/resume — продолжить прерванную запись\n/discard — прекратить оставшиеся действия без отката уже выполненных"
+		case "/settings", "/models":
+			return b.showSettings(ctx)
 		case "/tasks":
 			reply, err = b.assistant.Tasks(ctx)
 		case "/cancel":
@@ -297,6 +325,21 @@ func (b *Bot) handleUpdate(ctx context.Context, u tele.Update) error {
 			if text == "" {
 				reply.Text = "Поддерживаются текст и голосовые сообщения."
 			} else {
+				state, loadErr := b.repo.Load(ctx)
+				if loadErr != nil {
+					return loadErr
+				}
+				if state.RescheduleTaskID != "" {
+					taskID := state.RescheduleTaskID
+					state.RescheduleTaskID = ""
+					if err = b.repo.Save(ctx, state); err != nil {
+						return err
+					}
+					if err = b.assistant.Invalidate(ctx); err != nil {
+						return sendReply(ctx, b.telegram, model.Reply{Text: err.Error()})
+					}
+					text = "Перенеси задачу task_id=" + taskID + " на указанное пользователем время: " + text
+				}
 				reply, err = b.assistant.Text(ctx, text)
 			}
 		}
@@ -315,6 +358,24 @@ func (b *Bot) handleUpdate(ctx context.Context, u tele.Update) error {
 		}
 	}
 	return sendReply(ctx, b.telegram, reply)
+}
+
+func (b *Bot) sendScheduled(ctx context.Context) error {
+	replies, err := b.assistant.Scheduled(ctx)
+	if err != nil {
+		return err
+	}
+	for _, reply := range replies {
+		if err := sendReply(ctx, b.telegram, reply); err != nil {
+			return err
+		}
+		if reply.Schedule != "" {
+			if err := b.assistant.ScheduleSent(ctx, reply.Schedule, reply.ScheduleDate); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func Authorized(u tele.Update) bool {

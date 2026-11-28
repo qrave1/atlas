@@ -44,7 +44,7 @@ func New(ctx context.Context, path string) (*Store, error) {
 	s := &Store{db: db}
 	_, err = s.Load(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
-		state := model.State{InstallationID: NewID(), Owned: map[string]bool{}, TaskOwned: map[string]bool{}}
+		state := model.State{InstallationID: NewID(), Tasks: map[string]model.Task{}, TaskOperations: map[string]string{}, TaskStorageVersion: 1}
 		err = s.Save(ctx, state)
 	}
 	if err != nil {
@@ -71,11 +71,30 @@ func (s *Store) Load(ctx context.Context) (model.State, error) {
 	if err := json.Unmarshal(raw, &state); err != nil {
 		return state, err
 	}
-	if state.Owned == nil {
-		state.Owned = map[string]bool{}
+	legacyState := state.TaskStorageVersion == 0
+	if legacyState {
+		// Old snapshots had no local task data; start the local planner with an empty task set.
+		state.Tasks = map[string]model.Task{}
+		state.TaskOperations = map[string]string{}
+		state.TaskPending = nil
+		state.DailyPlanIDs = nil
+		state.RescheduleTaskID = ""
+		state.TaskStorageVersion = 1
 	}
-	if state.TaskOwned == nil {
-		state.TaskOwned = map[string]bool{}
+	if state.Tasks == nil {
+		state.Tasks = map[string]model.Task{}
+	}
+	if state.TaskOperations == nil {
+		state.TaskOperations = map[string]string{}
+	}
+	if legacyState {
+		migrated, err := json.Marshal(state)
+		if err != nil {
+			return state, err
+		}
+		if _, err = s.db.ExecContext(ctx, "UPDATE state SET value=? WHERE id=1", migrated); err != nil {
+			return state, err
+		}
 	}
 	return state, nil
 }

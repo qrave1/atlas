@@ -7,7 +7,6 @@ import (
 	_ "time/tzdata"
 
 	"github.com/qrave1/atlas/internal/clients/ai"
-	"github.com/qrave1/atlas/internal/clients/tasks"
 	"github.com/qrave1/atlas/internal/config"
 	"github.com/qrave1/atlas/internal/service"
 	"github.com/qrave1/atlas/internal/service/taskplanner"
@@ -28,18 +27,10 @@ func RunAtlas(ctx context.Context, logger *slog.Logger) error {
 		return err
 	}
 	defer repo.Close()
-	state, err := repo.Load(ctx)
-	if err != nil {
-		return err
-	}
 	httpClient := config.HTTPClient(90 * time.Second)
 	brain := ai.New(httpClient, cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.ChatModel, cfg.AI.TranscribeModel)
 	brain.SetModelsStore(repo)
-	googleTasks, err := tasks.New(ctx, httpClient, cfg.Google, state.InstallationID)
-	if err != nil {
-		return err
-	}
-	plans := taskplanner.New(repo, brain, googleTasks, location)
+	plans := taskplanner.New(repo, brain, location)
 	bot, err := service.New(ctx, cfg.Telegram, plans, repo, brain, logger)
 	if err != nil {
 		return err

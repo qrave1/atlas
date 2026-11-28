@@ -52,13 +52,13 @@ func TestTranscriptionRequestContract(t *testing.T) {
 	}
 }
 
-func TestIncompleteDecisionIsRejected(t *testing.T) {
+func TestIncompleteTaskDecisionIsRejected(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"finish_reason": "length", "message": map[string]string{"content": `{"reply":"ok","actions":[]}`}}}})
 	}))
 	defer server.Close()
 	client := New(server.Client(), server.URL, "test-key", "chat", "speech")
-	if _, err := client.Decide(context.Background(), time.Now(), nil, nil, nil); err == nil {
+	if _, err := client.DecideTasks(context.Background(), time.Now(), nil, nil, nil); err == nil {
 		t.Fatal("truncated completion accepted")
 	}
 }
@@ -70,13 +70,13 @@ func TestUpstreamErrorBodyIsNotExposed(t *testing.T) {
 	}))
 	defer server.Close()
 	client := New(server.Client(), server.URL, "test-key", "chat", "speech")
-	_, err := client.Decide(context.Background(), time.Now(), nil, nil, nil)
+	_, err := client.DecideTasks(context.Background(), time.Now(), nil, nil, nil)
 	if err == nil || strings.Contains(err.Error(), "sensitive") {
 		t.Fatalf("unsafe error: %v", err)
 	}
 }
 
-func TestDecisionRequestContract(t *testing.T) {
+func TestTaskDecisionRequestContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request openai.ChatCompletionRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -89,7 +89,7 @@ func TestDecisionRequestContract(t *testing.T) {
 	}))
 	defer server.Close()
 	c := New(server.Client(), server.URL+"/v1", "test", "openai/gpt-5-mini", "speech")
-	decision, err := c.Decide(t.Context(), time.Now(), nil, nil, nil)
+	decision, err := c.DecideTasks(t.Context(), time.Now(), nil, nil, nil)
 	if err != nil || decision.Reply != "ok" {
 		t.Fatalf("decision=%+v error=%v", decision, err)
 	}

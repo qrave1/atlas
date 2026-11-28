@@ -7,7 +7,7 @@ import (
 )
 
 func TestNewEnvTagsDefaultsAndOverrides(t *testing.T) {
-	for _, name := range []string{"AI_BASE_URL", "AI_CHAT_MODEL", "AI_TRANSCRIBE_MODEL", "GOOGLE_CREDENTIALS_FILE", "GOOGLE_TOKEN_FILE", "GOOGLE_CALENDAR_ID", "DATABASE_PATH"} {
+	for _, name := range []string{"AI_BASE_URL", "AI_CHAT_MODEL", "AI_TRANSCRIBE_MODEL", "DATABASE_PATH"} {
 		value, present := os.LookupEnv(name)
 		os.Unsetenv(name)
 		t.Cleanup(func() {
@@ -24,7 +24,7 @@ func TestNewEnvTagsDefaultsAndOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Database.Path != "data/atlas.db" || cfg.Google.CalendarID != "primary" || cfg.AI.BaseURL != "https://api.proxyapi.ru/v1" {
+	if cfg.Database.Path != "data/atlas.db" || cfg.AI.BaseURL != "https://api.proxyapi.ru/v1" {
 		t.Fatalf("defaults not parsed: %+v", cfg)
 	}
 	t.Setenv("DATABASE_PATH", "custom/state.db")

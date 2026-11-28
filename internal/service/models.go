@@ -3,10 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
-	"github.com/qrave1/atlas/internal/config"
-	tele "gopkg.in/telebot.v4"
 	"strconv"
 	"strings"
+
+	"github.com/qrave1/atlas/internal/config"
+	tele "gopkg.in/telebot.v4"
 )
 
 const (
@@ -17,10 +18,10 @@ const (
 var chatModels = [...]string{defaultChat, "openai/gpt-5-mini"}
 var speechModels = [...]string{defaultSpeech, "openai/gpt-4o-mini-transcribe"}
 
-func (b *Bot) showModels(ctx context.Context) error {
+func (b *Bot) currentModels(ctx context.Context) (string, string, error) {
 	state, err := b.repo.Load(ctx)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	chat, speech := state.ChatModel, state.TranscribeModel
 	fallbackChat, fallbackSpeech := defaultChat, defaultSpeech
@@ -33,23 +34,46 @@ func (b *Bot) showModels(ctx context.Context) error {
 	if speech == "" {
 		speech = fallbackSpeech
 	}
-	markup := &tele.ReplyMarkup{}
-	for i, m := range chatModels {
-		label := m
-		if m == chat {
-			label = "✓ " + m
-		}
-		markup.InlineKeyboard = append(markup.InlineKeyboard, []tele.InlineButton{{Text: label, Data: fmt.Sprintf("model:chat:%d", i)}})
+	return chat, speech, nil
+}
+
+func (b *Bot) showSettings(ctx context.Context) error {
+	chat, speech, err := b.currentModels(ctx)
+	if err != nil {
+		return err
 	}
-	for i, m := range speechModels {
-		label := m
-		if m == speech {
-			label = "✓ " + m
-		}
-		markup.InlineKeyboard = append(markup.InlineKeyboard, []tele.InlineButton{{Text: label, Data: fmt.Sprintf("model:speech:%d", i)}})
-	}
+	markup := &tele.ReplyMarkup{InlineKeyboard: [][]tele.InlineButton{
+		{{Text: "Модель генерации", Data: "settings:chat"}},
+		{{Text: "Модель транскрибации", Data: "settings:speech"}},
+	}}
 	return retryTelegram(ctx, func() error {
-		_, err := b.telegram.Send(tele.ChatID(config.OwnerID), "Выберите модель. Текущие отмечены галочкой.", markup)
+		_, err := b.telegram.Send(tele.ChatID(config.OwnerID), fmt.Sprintf("Настройки Atlas\n\nГенерация: %s\nТранскрибация: %s", chat, speech), markup)
+		return err
+	})
+}
+
+func (b *Bot) showModelChoices(ctx context.Context, kind string) error {
+	chat, speech, err := b.currentModels(ctx)
+	if err != nil {
+		return err
+	}
+	models, current, title := chatModels[:], chat, "Выберите модель генерации"
+	if kind == "speech" {
+		models, current, title = speechModels[:], speech, "Выберите модель транскрибации"
+	} else if kind != "chat" {
+		return nil
+	}
+	markup := &tele.ReplyMarkup{}
+	for i, m := range models {
+		label := m
+		if m == current {
+			label = "✓ " + m
+		}
+		markup.InlineKeyboard = append(markup.InlineKeyboard, []tele.InlineButton{{Text: label, Data: fmt.Sprintf("model:%s:%d", kind, i)}})
+	}
+	markup.InlineKeyboard = append(markup.InlineKeyboard, []tele.InlineButton{{Text: "← Настройки", Data: "settings:open"}})
+	return retryTelegram(ctx, func() error {
+		_, err := b.telegram.Send(tele.ChatID(config.OwnerID), title+". Текущая отмечена галочкой.", markup)
 		return err
 	})
 }
@@ -84,5 +108,5 @@ func (b *Bot) selectModel(ctx context.Context, selection string) error {
 	if err = b.repo.Save(ctx, state); err != nil {
 		return err
 	}
-	return b.showModels(ctx)
+	return b.showModelChoices(ctx, kind)
 }

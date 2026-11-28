@@ -21,8 +21,8 @@ func TestStateSurvivesDatabaseReopen(t *testing.T) {
 	}
 	id := state.InstallationID
 	state.Offset = 123
-	state.Owned["event"] = true
-	state.Pending = &model.Proposal{ID: "plan", Status: "applying", Completed: 1}
+	state.Tasks["task"] = model.Task{ID: "task", Title: "Practice", Status: "needsAction"}
+	state.TaskPending = &model.TaskProposal{ID: "plan", Status: "applying", Completed: 1}
 	if err = s.Save(ctx, state); err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestStateSurvivesDatabaseReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.InstallationID != id || state.Offset != 123 || !state.Owned["event"] || state.Pending.Completed != 1 {
+	if state.InstallationID != id || state.Offset != 123 || state.Tasks["task"].Title != "Practice" || state.TaskPending.Completed != 1 {
 		t.Fatalf("lost state: %+v", state)
 	}
 }

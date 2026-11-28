@@ -9,10 +9,10 @@ import (
 	tele "gopkg.in/telebot.v4"
 
 	"github.com/qrave1/atlas/internal/config"
-	"github.com/qrave1/atlas/internal/service/planner"
+	"github.com/qrave1/atlas/internal/model"
 )
 
-func sendReply(ctx context.Context, api *tele.Bot, reply planner.Reply) error {
+func sendReply(ctx context.Context, api *tele.Bot, reply model.Reply) error {
 	runes := []rune(reply.Text)
 	if len(runes) == 0 {
 		return nil
@@ -25,11 +25,22 @@ func sendReply(ctx context.Context, api *tele.Bot, reply planner.Reply) error {
 		text := string(runes[:n])
 		runes = runes[n:]
 		opts := &tele.SendOptions{}
-		if len(runes) == 0 && reply.ProposalID != "" {
-			opts.ReplyMarkup = &tele.ReplyMarkup{InlineKeyboard: [][]tele.InlineButton{{
-				{Text: "Подтвердить / повторить", Data: "confirm:" + reply.ProposalID},
-				{Text: "Отменить", Data: "cancel:" + reply.ProposalID},
-			}}}
+		if len(runes) == 0 && (reply.ProposalID != "" || len(reply.Buttons) > 0) {
+			keyboard := make([][]tele.InlineButton, 0, len(reply.Buttons)+1)
+			for _, row := range reply.Buttons {
+				buttons := make([]tele.InlineButton, 0, len(row))
+				for _, button := range row {
+					buttons = append(buttons, tele.InlineButton{Text: button.Text, Data: button.Data})
+				}
+				keyboard = append(keyboard, buttons)
+			}
+			if reply.ProposalID != "" {
+				keyboard = append(keyboard, []tele.InlineButton{
+					{Text: "Подтвердить / повторить", Data: "confirm:" + reply.ProposalID},
+					{Text: "Отменить", Data: "cancel:" + reply.ProposalID},
+				})
+			}
+			opts.ReplyMarkup = &tele.ReplyMarkup{InlineKeyboard: keyboard}
 		}
 		if err := retryTelegram(ctx, func() error {
 			_, err := api.Send(tele.ChatID(config.OwnerID), text, opts)

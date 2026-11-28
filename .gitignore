@@ -7,6 +7,3 @@ bin/
 *.exe
 coverage.out
 
-google-credentials.json
-google-token.json
-.token-*
