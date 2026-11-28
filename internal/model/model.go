@@ -7,6 +7,11 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+type Reply struct {
+	Text       string
+	ProposalID string
+}
+
 type Event struct {
 	ID          string    `json:"id"`
 	Title       string    `json:"title"`
@@ -40,6 +45,39 @@ type Proposal struct {
 	Completed int       `json:"completed"`
 }
 
+type Task struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Notes    string `json:"notes,omitempty"`
+	DueDate  string `json:"due_date,omitempty"`
+	Status   string `json:"status"`
+	ParentID string `json:"parent_id,omitempty"`
+	ETag     string `json:"etag"`
+}
+
+type TaskAction struct {
+	Kind        string `json:"kind"`
+	TaskID      string `json:"task_id,omitempty"`
+	ParentIndex *int   `json:"parent_index,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Notes       string `json:"notes,omitempty"`
+	DueDate     string `json:"due_date,omitempty"`
+	Before      *Task  `json:"before,omitempty"`
+}
+
+type TaskDecision struct {
+	Reply   string       `json:"reply"`
+	Actions []TaskAction `json:"actions"`
+}
+
+type TaskProposal struct {
+	ID        string       `json:"id"`
+	CreatedAt time.Time    `json:"created_at"`
+	Status    string       `json:"status"`
+	Actions   []TaskAction `json:"actions"`
+	Completed int          `json:"completed"`
+}
+
 type State struct {
 	ChatModel       string          `json:"chat_model,omitempty"`
 	TranscribeModel string          `json:"transcribe_model,omitempty"`
@@ -48,4 +86,6 @@ type State struct {
 	History         []Message       `json:"history"`
 	Owned           map[string]bool `json:"owned"`
 	Pending         *Proposal       `json:"pending,omitempty"`
+	TaskOwned       map[string]bool `json:"task_owned,omitempty"`
+	TaskPending     *TaskProposal   `json:"task_pending,omitempty"`
 }

@@ -44,7 +44,7 @@ func newCommand(logger *slog.Logger, run func(context.Context, *slog.Logger) err
 		},
 		Commands: []*cli.Command{{
 			Name:  "google-auth",
-			Usage: "Authorize Google Calendar",
+			Usage: "Authorize Google Tasks",
 			Flags: []cli.Flag{
 				&cli.StringFlag{Name: "credentials"},
 				&cli.StringFlag{Name: "token"},

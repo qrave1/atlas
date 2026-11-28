@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/qrave1/atlas/internal/config"
@@ -17,12 +18,66 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
+const (
+	CalendarScope = "https://www.googleapis.com/auth/calendar.events"
+	TasksScope    = "https://www.googleapis.com/auth/tasks"
+)
+
 func Config(path string) (*oauth2.Config, error) {
+	return ConfigWithScope(path, CalendarScope)
+}
+
+func TasksConfig(path string) (*oauth2.Config, error) {
+	return ConfigWithScope(path, TasksScope)
+}
+
+func ConfigWithScope(path, scope string) (*oauth2.Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	return google.ConfigFromJSON(raw, "https://www.googleapis.com/auth/calendar.events")
+	return google.ConfigFromJSON(raw, scope)
+}
+
+type tokenSource struct {
+	mu     sync.Mutex
+	source oauth2.TokenSource
+	path   string
+	last   string
+}
+
+func (s *tokenSource) Token() (*oauth2.Token, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	token, err := s.source.Token()
+	if err != nil {
+		return nil, err
+	}
+	if token.AccessToken != s.last {
+		if err = SaveToken(s.path, token); err != nil {
+			return nil, err
+		}
+		s.last = token.AccessToken
+	}
+	return token, nil
+}
+
+func AuthorizedClient(ctx context.Context, base *http.Client, credentialsPath, tokenPath, scope string) (*http.Client, error) {
+	cfg, err := ConfigWithScope(credentialsPath, scope)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(tokenPath)
+	if err != nil {
+		return nil, err
+	}
+	var token oauth2.Token
+	if err = json.Unmarshal(raw, &token); err != nil {
+		return nil, err
+	}
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, base)
+	source := &tokenSource{source: cfg.TokenSource(ctx, &token), path: tokenPath, last: token.AccessToken}
+	return &http.Client{Transport: &oauth2.Transport{Source: source, Base: base.Transport}, Timeout: base.Timeout, CheckRedirect: base.CheckRedirect}, nil
 }
 
 func SaveToken(path string, token *oauth2.Token) error {
@@ -62,7 +117,7 @@ func Authorize(ctx context.Context, credentialsPath, tokenPath string, output io
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	cfg, err := Config(credentialsPath)
+	cfg, err := TasksConfig(credentialsPath)
 	if err != nil {
 		return err
 	}
@@ -102,7 +157,7 @@ func Authorize(ctx context.Context, credentialsPath, tokenPath string, output io
 		if exchangeErr != nil {
 			http.Error(w, "Authorization failed; check terminal", http.StatusBadRequest)
 		} else {
-			fmt.Fprintln(w, "Google Calendar connected. You can close this tab.")
+			fmt.Fprintln(w, "Google Tasks connected. You can close this tab.")
 		}
 		select {
 		case result <- exchangeErr:

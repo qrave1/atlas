@@ -35,6 +35,7 @@ type Google struct {
 	CredentialsFile string `env:"GOOGLE_CREDENTIALS_FILE" envDefault:"./secrets/google-credentials.json"`
 	TokenFile       string `env:"GOOGLE_TOKEN_FILE" envDefault:"./secrets/google-token.json"`
 	CalendarID      string `env:"GOOGLE_CALENDAR_ID" envDefault:"primary"`
+	TaskListID      string `env:"GOOGLE_TASK_LIST_ID" envDefault:"@default"`
 }
 
 type Database struct {

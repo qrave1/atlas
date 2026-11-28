@@ -26,7 +26,7 @@ type Calendar interface {
 	Apply(context.Context, model.Action, string) error
 }
 
-type Reply struct{ Text, ProposalID string }
+type Reply = model.Reply
 type Service struct {
 	repo     Repository
 	brain    Brain

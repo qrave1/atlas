@@ -44,7 +44,7 @@ func New(ctx context.Context, path string) (*Store, error) {
 	s := &Store{db: db}
 	_, err = s.Load(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
-		state := model.State{InstallationID: NewID(), Owned: map[string]bool{}}
+		state := model.State{InstallationID: NewID(), Owned: map[string]bool{}, TaskOwned: map[string]bool{}}
 		err = s.Save(ctx, state)
 	}
 	if err != nil {
@@ -73,6 +73,9 @@ func (s *Store) Load(ctx context.Context) (model.State, error) {
 	}
 	if state.Owned == nil {
 		state.Owned = map[string]bool{}
+	}
+	if state.TaskOwned == nil {
+		state.TaskOwned = map[string]bool{}
 	}
 	return state, nil
 }

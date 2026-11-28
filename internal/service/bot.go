@@ -19,7 +19,7 @@ import (
 	tele "gopkg.in/telebot.v4"
 
 	"github.com/qrave1/atlas/internal/config"
-	"github.com/qrave1/atlas/internal/service/planner"
+	"github.com/qrave1/atlas/internal/model"
 )
 
 // Telebot does not accept a context on API calls. Cancel requests when Atlas stops.
@@ -142,15 +142,30 @@ func (t telegramTransport) RoundTrip(req *http.Request) (result *http.Response, 
 type Transcriber interface {
 	Transcribe(context.Context, []byte) (string, error)
 }
+
+type Assistant interface {
+	Invalidate(context.Context) error
+	Text(context.Context, string) (model.Reply, error)
+	Tasks(context.Context) (model.Reply, error)
+	Confirm(context.Context, string) (model.Reply, error)
+	Cancel(context.Context, string, bool) (model.Reply, error)
+	Resume(context.Context) (model.Reply, error)
+}
+
+type StateRepository interface {
+	Load(context.Context) (model.State, error)
+	Save(context.Context, model.State) error
+}
+
 type Bot struct {
 	telegram    *tele.Bot
-	planner     *planner.Service
-	repo        planner.Repository
+	assistant   Assistant
+	repo        StateRepository
 	transcriber Transcriber
 	log         *slog.Logger
 }
 
-func New(ctx context.Context, cfg config.Telegram, service *planner.Service, repo planner.Repository, transcriber Transcriber, logger *slog.Logger) (*Bot, error) {
+func New(ctx context.Context, cfg config.Telegram, service Assistant, repo StateRepository, transcriber Transcriber, logger *slog.Logger) (*Bot, error) {
 	client := config.HTTPClient(70 * time.Second)
 	api, err := newTelegram(ctx, tele.Settings{Token: cfg.Token, Client: client, Updates: 1}, logger)
 	if err != nil {
@@ -215,7 +230,7 @@ func (b *Bot) handleUpdate(ctx context.Context, u tele.Update) error {
 		return nil
 	}
 
-	var reply planner.Reply
+	var reply model.Reply
 	var err error
 
 	if u.Callback != nil {
@@ -230,9 +245,9 @@ func (b *Bot) handleUpdate(ctx context.Context, u tele.Update) error {
 		case "model":
 			return b.selectModel(ctx, id)
 		case "confirm":
-			reply, err = b.planner.Confirm(ctx, id)
+			reply, err = b.assistant.Confirm(ctx, id)
 		case "cancel":
-			reply, err = b.planner.Cancel(ctx, id, false)
+			reply, err = b.assistant.Cancel(ctx, id, false)
 		default:
 			return nil
 		}
@@ -240,13 +255,13 @@ func (b *Bot) handleUpdate(ctx context.Context, u tele.Update) error {
 		message := u.Message
 		text := strings.TrimSpace(message.Text)
 		if message.Voice != nil {
-			if err = b.planner.Invalidate(ctx); err != nil {
-				return sendReply(ctx, b.telegram, planner.Reply{Text: err.Error()})
+			if err = b.assistant.Invalidate(ctx); err != nil {
+				return sendReply(ctx, b.telegram, model.Reply{Text: err.Error()})
 			}
 			if message.Voice.Duration > 300 || message.Voice.FileSize > maxVoiceBytes {
-				return sendReply(ctx, b.telegram, planner.Reply{Text: "Пришлите голосовое до 5 минут и 20 МБ."})
+				return sendReply(ctx, b.telegram, model.Reply{Text: "Пришлите голосовое до 5 минут и 20 МБ."})
 			}
-			if err = sendReply(ctx, b.telegram, planner.Reply{Text: "Распознаю голосовое…"}); err != nil {
+			if err = sendReply(ctx, b.telegram, model.Reply{Text: "Распознаю голосовое…"}); err != nil {
 				return err
 			}
 			var audio []byte
@@ -259,41 +274,41 @@ func (b *Bot) handleUpdate(ctx context.Context, u tele.Update) error {
 			}
 			if err != nil {
 				b.log.Warn("Voice processing failed", "error", err)
-				return sendReply(ctx, b.telegram, planner.Reply{Text: "Не удалось распознать голосовое. Повторите или напишите текстом. Предыдущий черновик больше не подтверждается."})
+				return sendReply(ctx, b.telegram, model.Reply{Text: "Не удалось распознать голосовое. Повторите или напишите текстом. Предыдущий черновик больше не подтверждается."})
 			}
-			if err = sendReply(ctx, b.telegram, planner.Reply{Text: "Распознано: " + text}); err != nil {
+			if err = sendReply(ctx, b.telegram, model.Reply{Text: "Распознано: " + text}); err != nil {
 				return err
 			}
 		}
 		switch text {
 		case "/start", "/help":
-			reply.Text = "Я Atlas, ваш личный помощник. Отправьте задачу голосом или текстом. Если нет длительности — спрошу. Декомпозиция — только по просьбе. Все изменения — после кнопки подтверждения.\n\n/models — выбор моделей\n/tasks — мои события\n/cancel — отменить диалог\n/resume — продолжить прерванную запись\n/discard — прекратить оставшиеся действия без отката уже выполненных"
+			reply.Text = "Я Atlas, ваш личный помощник. Отправьте задачу голосом или текстом. Если укажете точное время, уточню, подходит ли срок только датой: Google Tasks не хранит время суток. Декомпозиция — только по просьбе. Все изменения — после кнопки подтверждения.\n\n/models — выбор моделей\n/tasks — мои задачи\n/cancel — отменить диалог\n/resume — продолжить прерванную запись\n/discard — прекратить оставшиеся действия без отката уже выполненных"
 		case "/models":
 			return b.showModels(ctx)
 		case "/tasks":
-			reply, err = b.planner.Tasks(ctx)
+			reply, err = b.assistant.Tasks(ctx)
 		case "/cancel":
-			reply, err = b.planner.Cancel(ctx, "", false)
+			reply, err = b.assistant.Cancel(ctx, "", false)
 		case "/discard":
-			reply, err = b.planner.Cancel(ctx, "", true)
+			reply, err = b.assistant.Cancel(ctx, "", true)
 		case "/resume":
-			reply, err = b.planner.Resume(ctx)
+			reply, err = b.assistant.Resume(ctx)
 		default:
 			if text == "" {
 				reply.Text = "Поддерживаются текст и голосовые сообщения."
 			} else {
-				reply, err = b.planner.Text(ctx, text)
+				reply, err = b.assistant.Text(ctx, text)
 			}
 		}
 	}
 	if err != nil {
-		// Never send upstream response bodies, URLs, API keys, or calendar tokens.
+		// Never send upstream response bodies, URLs, API keys, or OAuth tokens.
 		b.log.Error("Request processing failed", "error", err)
 		state, loadErr := b.repo.Load(ctx)
 		if loadErr != nil {
 			return loadErr
 		}
-		if state.Pending != nil && state.Pending.Status == "applying" {
+		if state.TaskPending != nil && state.TaskPending.Status == "applying" {
 			reply.Text = "Запись началась. Используйте /resume для продолжения или /discard для остановки оставшихся действий."
 		} else {
 			reply.Text = "Не удалось обработать запрос. Повторите сообщение. Если идёт запись, используйте /resume."
