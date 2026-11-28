@@ -229,9 +229,6 @@ func (s *Service) validateSchedule(action *model.TaskAction) error {
 	if !planned.After(s.now().In(s.location)) {
 		return errors.New("запланированное время уже прошло")
 	}
-	if action.EstimateMinutes == 0 && (action.Before == nil || action.Before.EstimateMinutes == 0) {
-		return errors.New("уточни, сколько времени заложить на эту задачу")
-	}
 	if action.DueDate == "" {
 		action.DueDate = planned.Format("2006-01-02")
 	}
